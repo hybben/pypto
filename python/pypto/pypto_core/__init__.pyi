@@ -129,6 +129,9 @@ class DataType:
     def __ne__(self, other: DataType) -> bool:
         """Inequality comparison operator"""
 
+    def __hash__(self) -> int:
+        """Hash support (required since __eq__ is defined)"""
+
     def __repr__(self) -> str:
         """String representation for debugging"""
 

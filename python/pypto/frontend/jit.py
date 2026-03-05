@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# coding: utf-8
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
@@ -10,23 +9,72 @@
 # -----------------------------------------------------------------------------------------------------------
 """
 """
+import ctypes
+import dataclasses
+import functools
+import inspect
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
-import ctypes
-import functools
-import inspect
+
 import torch
-from pypto.pypto_core.codegen import PTOCodegen
-from pypto import backend
+
+from pypto import DataType, backend
 from pypto.backend import BackendType
+from pypto.pypto_core.codegen import PTOCodegen
+from pypto.pypto_core.ir import ConstInt, PtrType, ScalarType, TensorType, Var
 
 _jit_functions = {}
 _kernel_functions = {}
 _compiled_cache = {}
 _default_device = "cpu"
+
+# torch.dtype → pl DataType (used to validate tensor args against kernel signature)
+_TORCH_TO_PL_DTYPE: dict = {
+    torch.float16:  DataType.FP16,
+    torch.bfloat16: DataType.BF16,
+    torch.float32:  DataType.FP32,
+    torch.int8:     DataType.INT8,
+    torch.int16:    DataType.INT16,
+    torch.int32:    DataType.INT32,
+    torch.int64:    DataType.INT64,
+    torch.uint8:    DataType.UINT8,
+    torch.bool:     DataType.BOOL,
+}
+
+# pl DataType → ctypes type (used to wrap scalar args before the ctypes call)
+_PL_DTYPE_TO_CTYPE: dict = {
+    DataType.FP32:   ctypes.c_float,
+    DataType.INT8:   ctypes.c_int8,
+    DataType.INT16:  ctypes.c_int16,
+    DataType.INT32:  ctypes.c_int32,
+    DataType.INT64:  ctypes.c_int64,
+    DataType.UINT8:  ctypes.c_uint8,
+    DataType.UINT16: ctypes.c_uint16,
+    DataType.UINT32: ctypes.c_uint32,
+    DataType.UINT64: ctypes.c_uint64,
+    DataType.BOOL:   ctypes.c_bool,
+}
+
+
+@dataclasses.dataclass
+class ParamSpec:
+    """Description of a single kernel parameter extracted from the IR."""
+
+    name: str
+    kind: str                    # "tensor" | "ptr" | "scalar"
+    dtype: DataType              # element dtype
+    # Tensor dims: positive int = static, str = named dynamic var, -1 = unnamed dynamic; None for ptr/scalar.
+    shape: list[int | str] | None
+
+
+@dataclasses.dataclass
+class CompiledKernel:
+    """Result of compile(): the .so path together with IR-derived parameter metadata."""
+
+    lib_path: str
+    param_specs: list[ParamSpec]
 
 # Pattern for __global__ AICORE void kernel_name(params)
 KERNEL_PATTERN = re.compile(
@@ -37,9 +85,14 @@ KERNEL_PATTERN = re.compile(
 # Pattern for a single param: __gm__ type* name or similar
 PARAM_PATTERN = re.compile(r"__gm__\s*(\w+)\s*\*\s*(\w+)")
 
+# Pattern for a scalar param: type name (no pointer, no __gm__)
+SCALAR_PARAM_PATTERN = re.compile(r"^(\w+)\s+(\w+)$")
 
-def parse_kernel_signature(line: str, rest: str = "") -> tuple[str, list[tuple[str, str]]] | None:
-    """Match __global__ AICORE void name(...) { and return (name, [(type, name), ...])."""
+
+def parse_kernel_signature(
+    line: str, rest: str = ""
+) -> tuple[str, list[tuple[str, str, bool]]] | None:
+    """Match __global__ AICORE void name(...) { and return (name, [(type, name, is_ptr), ...])."""
     combined = (line + rest).strip()
     m = KERNEL_PATTERN.search(combined)  # search in case of leading whitespace
     if not m:
@@ -48,35 +101,36 @@ def parse_kernel_signature(line: str, rest: str = "") -> tuple[str, list[tuple[s
     params_str = m.group(2).strip()
     if not params_str:
         return (kernel_name, [])
-    params = []
-    for part in params_str.split(","):
-        part = part.strip()
+    params: list[tuple[str, str, bool]] = []
+    for raw_part in params_str.split(","):
+        part = raw_part.strip()
         pm = PARAM_PATTERN.search(part)
         if pm:
-            params.append((pm.group(1), pm.group(2)))  # type, name
-        else:
-            # Fallback: treat as "type* name"
-            simple = re.match(r"(\w+)\s*\*\s*(\w+)", part)
-            if simple:
-                params.append((simple.group(1), simple.group(2)))
+            params.append((pm.group(1), pm.group(2), True))
+            continue
+        scalar = SCALAR_PARAM_PATTERN.match(part)
+        if scalar:
+            params.append((scalar.group(1), scalar.group(2), False))
     return (kernel_name, params)
 
 
-def build_call_wrapper(kernel_name: str, params: list[tuple[str, str]]) -> str:
-    """Build extern "C" void call_kernel(uint32_t blockDim, void* stream, uint8_t* v1, ...)."""
-    param_decls = ["uint8_t* " + name for _, name in params]
-    args = ["uint32_t blockDim", "void* stream"] + param_decls
-    cast_args = ["(" + typ + " *)" + name for typ, name in params]
-    return '''extern "C" void call_kernel(
+def build_call_wrapper(kernel_name: str, params: list[tuple[str, str, bool]]) -> str:
+    """Build extern "C" void call_kernel(uint32_t blockDim, void* stream, ...)."""
+    param_decls = []
+    cast_args = []
+    for typ, name, is_ptr in params:
+        if is_ptr:
+            param_decls.append(f"uint8_t* {name}")
+            cast_args.append(f"({typ} *){name}")
+        else:
+            param_decls.append(f"{typ} {name}")
+            cast_args.append(name)
+    return f'''extern "C" void call_kernel(
     uint32_t blockDim, void* stream,
-    {param_list})
+    {", ".join(param_decls)})
 {{
-    {kernel_name}<<<blockDim, nullptr, stream>>>({cast_list});
-}}'''.format(
-        param_list=", ".join(param_decls),
-        kernel_name=kernel_name,
-        cast_list=", ".join(cast_args),
-    )
+    {kernel_name}<<<blockDim, nullptr, stream>>>({", ".join(cast_args)});
+}}'''
 
 
 def convert(content: str) -> str:
@@ -84,10 +138,8 @@ def convert(content: str) -> str:
     if not lines:
         return content
 
-    out: list[str] = []
-    i = 0
     kernel_name: str | None = None
-    kernel_params: list[tuple[str, str]] = []
+    kernel_params: list[tuple[str, str, bool]] = []
 
     # Find kernel signature (single line or multi-line)
     for idx, rline in enumerate(lines):
@@ -111,6 +163,159 @@ def convert(content: str) -> str:
         if not result.endswith("\n"):
             result += "\n"
 
+    return result
+
+
+def _pl_dtype_to_torch(dtype: DataType):
+    """Return the torch.dtype that corresponds to a pl DataType, or None if unknown."""
+    for torch_dtype, pl_dtype in _TORCH_TO_PL_DTYPE.items():
+        if pl_dtype == dtype:
+            return torch_dtype
+    return None
+
+
+def _extract_param_specs(prog) -> list[ParamSpec]:
+    """Extract parameter descriptions from the first function in an ir.Program."""
+    func = next(iter(prog.functions.values()))
+    specs: list[ParamSpec] = []
+    for var in func.params:
+        t = var.type
+        if isinstance(t, TensorType):
+            shape = [
+                s.value if isinstance(s, ConstInt)
+                else (s.name if isinstance(s, Var) else -1)
+                for s in t.shape
+            ]
+            specs.append(ParamSpec(var.name, "tensor", t.dtype, shape))
+        elif isinstance(t, PtrType):
+            specs.append(ParamSpec(var.name, "ptr", t.dtype, None))
+        elif isinstance(t, ScalarType):
+            specs.append(ParamSpec(var.name, "scalar", t.dtype, None))
+    return specs
+
+
+def _collect_dyn_vars(param_specs: list[ParamSpec]) -> list[str]:
+    """Return dynamic shape variable names in first-occurrence order (mirrors ptoas codegen)."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for spec in param_specs:
+        if spec.kind == "tensor" and spec.shape is not None:
+            for dim in spec.shape:
+                if isinstance(dim, str) and dim not in seen:
+                    result.append(dim)
+                    seen.add(dim)
+    return result
+
+
+def _validate_tensor_arg(
+    i: int, arg, spec: ParamSpec, dyn_var_values: dict[str, int]
+) -> None:
+    """Validate one tensor/ptr arg; update dyn_var_values in-place for dynamic dims."""
+    if not isinstance(arg, torch.Tensor):
+        raise TypeError(
+            f"arg[{i}] '{spec.name}': expected torch.Tensor, got {type(arg).__name__}"
+        )
+    if spec.kind == "ptr" or spec.shape is None:
+        return
+
+    expected_dtype = _pl_dtype_to_torch(spec.dtype)
+    if expected_dtype is not None and arg.dtype != expected_dtype:
+        raise TypeError(
+            f"arg[{i}] '{spec.name}': dtype mismatch — "
+            f"expected {expected_dtype}, got {arg.dtype}"
+        )
+    if len(arg.shape) != len(spec.shape):
+        raise TypeError(
+            f"arg[{i}] '{spec.name}': rank mismatch — "
+            f"expected {len(spec.shape)}D, got {len(arg.shape)}D"
+        )
+    for d, (actual, expected) in enumerate(zip(arg.shape, spec.shape)):
+        if isinstance(expected, int) and expected not in (-1, actual):
+            raise TypeError(
+                f"arg[{i}] '{spec.name}': dim[{d}] mismatch — "
+                f"expected {expected}, got {actual}"
+            )
+        if isinstance(expected, str):
+            if expected in dyn_var_values and dyn_var_values[expected] != actual:
+                raise TypeError(
+                    f"arg[{i}] '{spec.name}': dynamic shape variable '{expected}' "
+                    f"mismatch — previously {dyn_var_values[expected]}, "
+                    f"got {actual} at dim[{d}]"
+                )
+            dyn_var_values.setdefault(expected, actual)
+
+
+def _validate_scalar_arg(i: int, arg, spec: ParamSpec) -> None:
+    """Validate one scalar arg against its ParamSpec."""
+    if not isinstance(arg, (int, float, bool)):
+        raise TypeError(
+            f"arg[{i}] '{spec.name}': expected Python scalar (int/float/bool), "
+            f"got {type(arg).__name__}"
+        )
+    # bool is a subclass of int: valid for BOOL and integer dtypes only.
+    if isinstance(arg, bool):
+        if not (
+            spec.dtype == DataType.BOOL
+            or spec.dtype.is_signed_int()
+            or spec.dtype.is_unsigned_int()
+        ):
+            raise TypeError(
+                f"arg[{i}] '{spec.name}': bool value passed for non-boolean/non-integer "
+                f"dtype {spec.dtype}"
+            )
+    elif isinstance(arg, float) and not spec.dtype.is_float():
+        raise TypeError(
+            f"arg[{i}] '{spec.name}': float value passed for non-float dtype {spec.dtype}"
+        )
+    elif isinstance(arg, int) and not spec.dtype.is_signed_int() and not spec.dtype.is_unsigned_int():
+        raise TypeError(
+            f"arg[{i}] '{spec.name}': int value passed for non-integer dtype {spec.dtype}"
+        )
+
+
+def _validate_args(args: tuple, param_specs: list[ParamSpec]) -> None:
+    """Validate runtime args against the kernel's IR parameter descriptions.
+
+    Raises:
+        TypeError: On count mismatch, wrong arg type, dtype mismatch, or shape mismatch.
+    """
+    if len(args) != len(param_specs):
+        raise TypeError(f"Expected {len(param_specs)} args, got {len(args)}")
+    dyn_var_values: dict[str, int] = {}
+    for i, (arg, spec) in enumerate(zip(args, param_specs)):
+        if spec.kind in ("tensor", "ptr"):
+            _validate_tensor_arg(i, arg, spec, dyn_var_values)
+        else:
+            _validate_scalar_arg(i, arg, spec)
+
+
+def _args_to_ctypes(args: tuple, param_specs: list[ParamSpec]) -> list:
+    """Convert runtime args to ctypes values for the call_kernel ABI.
+
+    - tensor / ptr → ctypes.c_void_p (raw data pointer)
+    - scalar       → ctypes type matching the DataType (e.g. c_float, c_int32)
+    - dynamic dims → ctypes.c_int64, appended in first-occurrence order
+    """
+    result = []
+    dyn_var_values: dict[str, int] = {}  # insertion order = first-occurrence order (Python 3.7+)
+
+    for arg, spec in zip(args, param_specs):
+        if spec.kind in ("tensor", "ptr"):
+            result.append(ctypes.c_void_p(arg.data_ptr()))
+            if spec.kind == "tensor" and spec.shape is not None:
+                for d, dim in enumerate(spec.shape):
+                    if isinstance(dim, str):
+                        dyn_var_values.setdefault(dim, arg.shape[d])
+        else:
+            ctype = _PL_DTYPE_TO_CTYPE.get(spec.dtype)
+            if ctype is None:
+                raise TypeError(
+                    f"No ctypes mapping for scalar dtype {spec.dtype} "
+                    f"(param '{spec.name}'). FP16/BF16 scalars are not supported."
+                )
+            result.append(ctype(arg))
+
+    result.extend(ctypes.c_int64(v) for v in dyn_var_values.values())
     return result
 
 
@@ -142,7 +347,7 @@ def compile(prog, clean_up=False, timeout=20):
     # need https://github.com/zhangstevenunity/PTOAS/issues/10
     subprocess.run(
         ["ptoas", ir_path, "--enable-insert-sync", "-o", raw_cpp_path],
-        timeout=timeout, stderr=subprocess.DEVNULL
+        check=False, timeout=timeout, stderr=subprocess.DEVNULL
     )
 
     # Step 3, preprocess cpp source
@@ -168,7 +373,7 @@ def compile(prog, clean_up=False, timeout=20):
 
     subprocess.run(
         ["bisheng", *flags, final_kernel, "-L", LD_LIB_PATH, "-lruntime", "-o", lib_path],
-        timeout=timeout
+        check=False, timeout=timeout
     )
 
     if clean_up:
@@ -176,36 +381,20 @@ def compile(prog, clean_up=False, timeout=20):
         os.remove(raw_cpp_path)
         os.remove(final_kernel)
 
-    return lib_path
+    return CompiledKernel(lib_path=lib_path, param_specs=_extract_param_specs(prog))
 
 
-def torch_to_ctypes(tensor):
-    return ctypes.c_void_p(tensor.data_ptr())
-
-
-def load_lib(lib_path, clean_up=False):
+def load_lib(lib_path: str, param_specs: list[ParamSpec], clean_up: bool = False):
     lib = ctypes.CDLL(lib_path)
 
     default_block_dim = 1  # TODO: extend kernel to multi-core
 
-    def func_wrapper(
-        *tensors,
-        block_dim=default_block_dim,
-        stream=None
-    ):
-        for i, t in enumerate(tensors):
-            if not isinstance(t, torch.Tensor):
-                raise TypeError(f"argument{i} must be torch.Tensor, real type is: {type(t)}")
-            
+    def func_wrapper(*args, block_dim=default_block_dim, stream=None):
+        _validate_args(args, param_specs)
         if stream is None:
             stream = torch.npu.current_stream()
-        ptrs = [torch_to_ctypes(t) for t in tensors]
-        # TODO (important): matching call signature to arg list information in Python `build_module`
-        lib.call_kernel(
-            block_dim,
-            stream._as_parameter_,
-            *ptrs
-        )
+        ctypes_args = _args_to_ctypes(args, param_specs)
+        lib.call_kernel(block_dim, stream._as_parameter_, *ctypes_args)
 
     if clean_up:
         os.remove(lib_path)
@@ -213,53 +402,53 @@ def load_lib(lib_path, clean_up=False):
     return func_wrapper
 
 
-def launch(stream=None, block_dim=1, compiled_result="", *tensors):
-    if compiled_result == "":
-        raise RuntimeError("Compile error is empty")
-    
-    compiled_func = load_lib(compiled_result)
+def launch(stream=None, block_dim=1, compiled_result: "CompiledKernel | str" = "", *args):
+    if isinstance(compiled_result, str):
+        if compiled_result == "":
+            raise RuntimeError("compiled_result is empty")
+        lib_path: str = compiled_result
+        param_specs: list[ParamSpec] = []
+    else:
+        lib_path = compiled_result.lib_path
+        param_specs = compiled_result.param_specs
     if stream is None:
         stream = torch.npu.current_stream()
-    # ptrs = [torch_to_ctypes(t) for t in tensors]
-    compiled_func(*tensors, block_dim=block_dim, stream=stream)
+    compiled_func = load_lib(lib_path, param_specs)
+    compiled_func(*args, block_dim=block_dim, stream=stream)
 
 
-def jit(target=None, optimize: bool = True, cache: bool = True, 
+def jit(target=None, optimize: bool = True, cache: bool = True,
     preprocess: bool = True,
     *dargs, **kwargs):
-    """
-    @pto.jit 装饰器: 标记函数为JIT编译函数
-    
-    参数:
-        func: 要装饰的函数
-        target: 编译目标 ('cpu', 'npu')
-        optimize: 是否启用优化
-        cache: 是否缓存编译结果
-    
-    示例:
+    """Mark a function for JIT compilation.
+
+    Args:
+        target: Compilation target ('cpu', 'npu').
+        optimize: Whether to enable optimizations.
+        cache: Whether to cache compilation results.
+
+    Example::
+
         @pto.jit
         def add(a, b):
             workspace_size = 100
             pto.launch(add_kernel)
             return workspace_size
     """
-    
+
     def decorator(f):
-        # 获取函数信息
         name = f.__name__
         signature = inspect.signature(f)
-        
-        # 获取源代码（去除装饰器行）
+
+        # Strip decorator lines before storing source.
         try:
             source_lines = inspect.getsource(f).split('\n')
-            # 移除装饰器行
-            source_lines = [line for line in source_lines 
+            source_lines = [line for line in source_lines
                           if '@pto.jit' not in line and '@pto.kernel' not in line]
             source_code = '\n'.join(source_lines).strip()
-        except:
+        except OSError:
             source_code = "<source unavailable>"
-        print("In jit decorator, registering JIT function:", name)
-        # 存储JIT函数信息
+        # Store JIT function metadata.
         _jit_functions[name] = {
             'func': f,
             'name': name,
@@ -270,17 +459,17 @@ def jit(target=None, optimize: bool = True, cache: bool = True,
             'cache': cache,
             'kwargs': kwargs
         }
-        
+
         @functools.wraps(f)
         def wrapper(*args, **kwargs_):
             # if name in _compiled_cache:
             #     return _compiled_cache[name](*args, **kwargs_)
-            
-            # jit函数没有命中缓存，回退到Python执行
+
+            # jit cache not hit — fall back to Python execution.
             return f(*args, **kwargs_)
-        
+
         return wrapper
-    
+
     if callable(target):
         return decorator(target)
     else:
