@@ -20,16 +20,18 @@
  */
 
 #include <any>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "pypto/core/logging.h"
+#include "pypto/ir/expr.h"
 #include "pypto/ir/kind_traits.h"
+#include "pypto/ir/memref.h"
 #include "pypto/ir/op_registry.h"
 #include "pypto/ir/type.h"
-#include "pypto/ir/type_inference.h"
 
 namespace pypto {
 namespace ir {
@@ -64,11 +66,38 @@ REGISTER_OP("manual.load")
         "The output tile (last arg) defines the destination buffer; its type is returned.")
     .add_argument("tensor", "Source tensor (TensorType)")
     .add_argument("offsets", "Offset tuple per dimension (MakeTuple)")
-    .add_argument("shapes", "Size tuple per dimension (MakeTuple)")
+    .add_argument("shapes", "Size tuple per dimension (MakeTuple, may be empty)")
     .add_argument("out", "Pre-allocated destination tile (TileType)")
     .f_deduce_type([](const std::vector<ExprPtr>& args,
                       const std::vector<std::pair<std::string, std::any>>& kwargs) {
       return DeduceManualOutTileType(args, kwargs, "manual.load", 4);
+    });
+
+// manual.store: (tile, offsets, shapes, output_tensor) -> TensorType
+REGISTER_OP("manual.store")
+    .set_op_category("ManualOp")
+    .set_description(
+        "Manual store: copy data from a pre-allocated tile to a global tensor. "
+        "An empty shapes tuple skips set_validshape.")
+    .add_argument("tile", "Source tile (TileType)")
+    .add_argument("offsets", "Offset tuple per dimension (MakeTuple)")
+    .add_argument("shapes", "Size tuple per dimension (MakeTuple, may be empty)")
+    .add_argument("output_tensor", "Destination tensor (TensorType)")
+    .f_deduce_type([](const std::vector<ExprPtr>& args,
+                      const std::vector<std::pair<std::string, std::any>>& kwargs) {
+      CHECK(args.size() == 4) << "manual.store requires 4 arguments, got " << args.size();
+      CHECK(As<TileType>(args[0]->GetType()))
+          << "manual.store: arg 0 must be TileType";
+      auto offsets = As<MakeTuple>(args[1]);
+      CHECK(offsets) << "manual.store: arg 1 must be MakeTuple (offsets)";
+      auto shapes = As<MakeTuple>(args[2]);
+      CHECK(shapes) << "manual.store: arg 2 must be MakeTuple (shapes)";
+      auto out_type = As<TensorType>(args[3]->GetType());
+      CHECK(out_type) << "manual.store: arg 3 must be TensorType";
+      CHECK(shapes->elements_.empty() ||
+            offsets->elements_.size() == shapes->elements_.size())
+          << "manual.store: offsets/shapes dimension mismatch";
+      return out_type;
     });
 
 // manual.move: (src_tile, out) -> TileType (out's type)

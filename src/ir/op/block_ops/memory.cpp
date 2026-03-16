@@ -19,6 +19,7 @@
 
 #include <any>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -33,6 +34,7 @@
 #include "pypto/ir/memref.h"
 #include "pypto/ir/op_registry.h"
 #include "pypto/ir/scalar_expr.h"
+#include "pypto/ir/span.h"
 #include "pypto/ir/type.h"
 
 namespace pypto {
@@ -156,14 +158,11 @@ TypePtr DeduceBlockStoreType(const std::vector<ExprPtr>& args,
                       << " requires third argument to be a tuple (shapes), but got "
                       << args[2]->GetType()->TypeName();
 
-  // Verify offsets and shapes have same number of dimensions
+  // Verify offsets and shapes have same number of dimensions.
   CHECK(offsets_tuple->elements_.size() == shapes_tuple->elements_.size())
       << "The operator " << op_name
       << " requires offsets and shapes to have same number of dimensions, but got "
       << offsets_tuple->elements_.size() << " offsets and " << shapes_tuple->elements_.size() << " shapes";
-
-  CHECK(shapes_tuple->elements_.size() > 0)
-      << "The operator " << op_name << " requires at least one dimension, but got empty shapes tuple";
 
   // Fourth argument must be the output tensor
   auto output_tensor_type = As<TensorType>(args[3]->GetType());

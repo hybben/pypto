@@ -436,11 +436,19 @@ void PTOCodegen::EmitAllocTiles(const ir::FunctionPtr& func, const std::vector<i
         if (tv.valid_shape.size() >= 1) {
           if (auto var = As<ir::Var>(tv.valid_shape[0])) {
             valid_row_mlir = GetVarName(var);
+          } else if (auto var = As<ir::ConstInt>(tv.valid_shape[0])) {
+            if (var->value_ == -1) {
+              valid_row_mlir = GetExprAsCode(tile_type->shape_[0]);
+            }
           }
         }
         if (tv.valid_shape.size() >= 2) {
           if (auto var = As<ir::Var>(tv.valid_shape[1])) {
             valid_col_mlir = GetVarName(var);
+          } else if (auto var = As<ir::ConstInt>(tv.valid_shape[1])) {
+            if (var->value_ == -1) {
+              valid_col_mlir = GetExprAsCode(tile_type->shape_[1]);
+            }
           }
         }
       }
@@ -736,14 +744,22 @@ static void ExtractTileTypeInfo(const TileType& tile_type, const PTOCodegen& cod
       if (auto var = As<ir::Var>(tv.valid_shape[0])) {
         v_row_dynamic = true;
       } else if (auto c = As<ir::ConstInt>(tv.valid_shape[0])) {
-        v_row = c->value_;
+        if (c->value_ == -1) {
+          v_row_dynamic = true;
+        } else {
+          v_row = c->value_;
+        }
       }
     }
     if (tv.valid_shape.size() >= 2) {
       if (auto var = As<ir::Var>(tv.valid_shape[1])) {
         v_col_dynamic = true;
       } else if (auto c = As<ir::ConstInt>(tv.valid_shape[1])) {
-        v_col = c->value_;
+        if (c->value_ == -1) {
+          v_col_dynamic = true;
+        } else {
+          v_col = c->value_;
+        }
       }
     }
   } else if (cols == 1 && rows > 1) {
@@ -974,6 +990,10 @@ void PTOCodegen::VisitExpr_(const ir::LtPtr& op) { VisitCmpExpr(op, "slt"); }
 void PTOCodegen::VisitExpr_(const ir::LePtr& op) { VisitCmpExpr(op, "sle"); }
 void PTOCodegen::VisitExpr_(const ir::GtPtr& op) { VisitCmpExpr(op, "sgt"); }
 void PTOCodegen::VisitExpr_(const ir::GePtr& op) { VisitCmpExpr(op, "sge"); }
+
+void PTOCodegen::VisitExpr_(const ir::MaxPtr& op) { VisitBinaryArithExpr(op, "arith.maxsi", "arith.maximumf"); }
+void PTOCodegen::VisitExpr_(const ir::MinPtr& op) { VisitBinaryArithExpr(op, "arith.minsi", "arith.minimumf"); }
+
 
 // ========================================================================
 // Statement visitors - Control flow

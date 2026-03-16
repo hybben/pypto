@@ -234,10 +234,13 @@ static std::string MakeManualLoadCodegenPTO(const CallPtr& op, codegen::CodegenB
   auto out_tile = As<Var>(op->args_[3]);
   INTERNAL_CHECK(out_tile) << "manual.load: fourth argument (out) must be a Var";
 
+  auto tile_type = As<ir::TileType>(out_tile->GetType());
+  INTERNAL_CHECK(tile_type) << "manual.load: fourth argument (out) must be a Tile";
+
   auto row_off = codegen.GetExprAsCode(offsets_tuple->elements_[0]);
   auto col_off = codegen.GetExprAsCode(offsets_tuple->elements_[1]);
-  int64_t height  = codegen.GetConstIntValue(shapes_tuple->elements_[0]);
-  int64_t width   = codegen.GetConstIntValue(shapes_tuple->elements_[1]);
+  int64_t height  = codegen.GetConstIntValue(tile_type->shape_[0]);
+  int64_t width   = codegen.GetConstIntValue(tile_type->shape_[1]);
 
   auto tensor_type = As<TensorType>(tensor->GetType());
   INTERNAL_CHECK(tensor_type) << "manual.load: tensor argument must have TensorType";
@@ -250,14 +253,6 @@ static std::string MakeManualLoadCodegenPTO(const CallPtr& op, codegen::CodegenB
   std::string partition_type   = "!pto.partition_tensor_view<" + std::to_string(height) + "x" +
                                  std::to_string(width) + "x" + dtype_str + ">";
 
-  // Derive tile_buf type from the out_tile's TileType memref (may be empty before alloc pass).
-  std::string tile_buf_type;
-  if (auto tile_type = As<ir::TileType>(out_tile->GetType())) {
-    if (tile_type->memref_.has_value()) {
-      tile_buf_type = codegen.GetTileBufTypeString(tile_type->memref_.value().get());
-    }
-  }
-
   // Emit partition_view.
   std::string partition_view = codegen.NewTemp();
   std::ostringstream pv_line;
@@ -268,13 +263,106 @@ static std::string MakeManualLoadCodegenPTO(const CallPtr& op, codegen::CodegenB
           << " : " << tensor_view_type << " -> " << partition_type;
   codegen.Emit(pv_line.str());
 
+  // Derive tile_buf type from the out_tile's TileType memref (may be empty before alloc pass).
+  std::string tile_buf_type = codegen.GetTileBufTypeStringFromTileType(tile_type);
+
+  // Emit set_validshape only for dynamic tiles.
+  // Static tiles don't need valid shape; ptoas also doesn't support pto.set_validshape for them.
+  if (!shapes_tuple->elements_.empty()) {
+    bool is_dynamic = tile_buf_type.find("v_row=?, v_col=?") != std::string::npos;
+    INTERNAL_CHECK(is_dynamic) << "manual.load: only dynamic tile can set valid shape";
+    std::ostringstream set_line;
+    auto valid_row = codegen.GetExprAsCode(shapes_tuple->elements_[0]);
+    auto valid_col = codegen.GetExprAsCode(shapes_tuple->elements_[1]);
+    set_line << "pto.set_validshape " << tile_buf << ", "
+              << valid_row << ", " << valid_col << " : " << tile_buf_type;
+    codegen.Emit(set_line.str());
+  }
+
   // Emit tload using the explicit out_tile as outs target.
   std::ostringstream tload_line;
   tload_line << "pto.tload ins(" << partition_view << " : " << partition_type
-             << ") outs(" << tile_buf;
-  if (!tile_buf_type.empty()) tload_line << " : " << tile_buf_type;
-  tload_line << ")";
+             << ") outs(" << tile_buf << " : " << tile_buf_type << ")";
   codegen.Emit(tload_line.str());
+
+  return "";
+}
+
+// ============================================================================
+// manual.store codegen
+//
+// Emits:
+//   %pv = pto.partition_view %tensor_view, offsets=[...], sizes=[...] : T -> PTV
+//   (optional) pto.set_validshape %tile_buf, row, col : TileBufType
+//   pto.tstore ins(%tile_buf : TileBufType) outs(%pv : PTV)
+// ============================================================================
+
+static std::string MakeManualStoreCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+
+  auto tile = As<Var>(op->args_[0]);
+  INTERNAL_CHECK(tile) << "manual.store: first argument must be a Var";
+
+  auto tile_type = As<ir::TileType>(tile->GetType());
+  INTERNAL_CHECK(tile_type) << "manual.store: first argument must be a Tile";
+
+  auto offsets_tuple = As<ir::MakeTuple>(op->args_[1]);
+  INTERNAL_CHECK(offsets_tuple) << "manual.store: second argument must be a MakeTuple (offsets)";
+
+  auto shapes_tuple = As<ir::MakeTuple>(op->args_[2]);
+  INTERNAL_CHECK(shapes_tuple) << "manual.store: third argument must be a MakeTuple (shapes)";
+
+  auto output_tensor = As<Var>(op->args_[3]);
+  INTERNAL_CHECK(output_tensor) << "manual.store: fourth argument must be a Var";
+
+  auto tensor_type = As<TensorType>(output_tensor->GetType());
+  INTERNAL_CHECK(tensor_type) << "manual.store: fourth argument must have TensorType";
+
+  auto row_off = codegen.GetExprAsCode(offsets_tuple->elements_[0]);
+  auto col_off = codegen.GetExprAsCode(offsets_tuple->elements_[1]);
+  int64_t height = codegen.GetConstIntValue(tile_type->shape_[0]);
+  int64_t width  = codegen.GetConstIntValue(tile_type->shape_[1]);
+
+  std::string dtype_str = codegen.GetTypeString(tensor_type->dtype_);
+  std::string tensor_view = codegen.GetOrCreateTensorView(output_tensor);
+  std::string tile_buf = codegen.GetVarName(tile);
+
+  std::string tensor_view_type = codegen.GetTensorViewTypeString(tensor_type.get());
+  std::string partition_type   = "!pto.partition_tensor_view<" + std::to_string(height) + "x" +
+                                 std::to_string(width) + "x" + dtype_str + ">";
+
+  std::string tile_buf_type = codegen.GetTileBufTypeStringFromTileType(tile_type);
+
+  std::string partition_view = codegen.NewTemp();
+  std::ostringstream pv_line;
+  pv_line << partition_view << " = pto.partition_view " << tensor_view
+          << ", offsets = [" << row_off << ", " << col_off << "]"
+          << ", sizes = [" << codegen.GetIndexConstant(height) << ", "
+          << codegen.GetIndexConstant(width) << "]"
+          << " : " << tensor_view_type << " -> " << partition_type;
+  codegen.Emit(pv_line.str());
+
+  // Emit set_validshape only for dynamic tiles.
+  // Static tiles don't need valid shape; ptoas also doesn't support pto.set_validshape for them.
+  if (!shapes_tuple->elements_.empty()) {
+    bool is_dynamic = tile_buf_type.find("v_row=?, v_col=?") != std::string::npos;
+    if (is_dynamic) {
+      std::ostringstream set_line;
+      auto valid_row = codegen.GetExprAsCode(shapes_tuple->elements_[0]);
+      auto valid_col = codegen.GetExprAsCode(shapes_tuple->elements_[1]);
+      set_line << "pto.set_validshape " << tile_buf << ", "
+               << valid_row << ", " << valid_col << " : " << tile_buf_type;
+      codegen.Emit(set_line.str());
+    }
+  }
+
+  std::ostringstream tstore_line;
+  tstore_line << "pto.tstore ins(" << tile_buf;
+  if (!tile_buf_type.empty()) {
+    tstore_line << " : " << tile_buf_type;
+  }
+  tstore_line << ") outs(" << partition_view << " : " << partition_type << ")";
+  codegen.Emit(tstore_line.str());
 
   return "";
 }
@@ -291,6 +379,12 @@ REGISTER_BACKEND_OP(Backend910B_PTO, "manual.load")
     .set_pipe(ir::PipeType::MTE2)
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
       return MakeManualLoadCodegenPTO(op, codegen);
+    });
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "manual.store")
+    .set_pipe(ir::PipeType::MTE3)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeManualStoreCodegenPTO(op, codegen);
     });
 
 REGISTER_BACKEND_OP(Backend910B_PTO, "manual.move")
