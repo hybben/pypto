@@ -66,6 +66,7 @@ from .op.manual_ops import (
     gemv_acc,
     gemv_bias,
     get_block_idx,
+    get_block_num,
     get_subblock_idx,
     l0c_store,
     lrelu,

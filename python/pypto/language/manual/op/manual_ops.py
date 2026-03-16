@@ -299,9 +299,27 @@ def get_subblock_idx() -> Scalar:
 
     Returns:
         Scalar wrapping to subblock index (UINT64 type).
+        >>>     ...
     """
     from pypto.language.op.block_ops import get_subblock_idx as _get_subblock_idx
     return _get_subblock_idx()
+
+
+def get_block_num() -> Scalar:
+    """Return to current block number (unchanged from SSA style).
+
+    Returns:
+        Scalar wrapping to block number (UINT64 type).
+
+    Example:
+        >>> block_num = pm.get_block_num()
+        >>> if block_num < 5:
+        >>>     # Process first 5 blocks differently
+        >>>     ...
+        >>>     ...
+    """
+    from pypto.language.op.block_ops import get_block_num as _get_block_num
+    return _get_block_num()
 
 
 # ---------------------------------------------------------------------------
@@ -714,7 +732,7 @@ __all__ = [
     "make_tile",
     # Memory
     "load", "load_tile", "store", "store_tile", "l0c_store", "move", "ub_copy", "full", "fillpad", "get_block_idx", 
-    "get_subblock_idx",
+    "get_block_num", "get_subblock_idx",
     # Tile x Tile binary
     "add", "sub", "mul", "div", "rem", "maximum", "minimum",
     "and_", "or_", "shl", "shr",

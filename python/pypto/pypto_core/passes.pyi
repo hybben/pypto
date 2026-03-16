@@ -286,6 +286,13 @@ class IRVerifier:
     @staticmethod
     def generate_report(diagnostics: list[Diagnostic]) -> str: ...
 
+def lower_break_continue() -> Pass:
+    """Create a pass that lowers break/continue statements to structured control flow.
+
+    Transforms BreakStmt and ContinueStmt into nested scf.if blocks before codegen.
+    Must run before convert_to_ssa and before code generation.
+    """
+
 def run_verifier(disabled_rules: list[str] | None = None) -> Pass:
     """Create a verifier pass with configurable rules."""
 
@@ -321,6 +328,7 @@ __all__ = [
     "flatten_call_expr",
     "normalize_stmt_structure",
     "flatten_single_stmt",
+    "lower_break_continue",
     "NestedCallErrorType",
     "DiagnosticSeverity",
     "Diagnostic",

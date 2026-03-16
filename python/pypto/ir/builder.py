@@ -547,6 +547,38 @@ class IRBuilder:
         self._builder.emit(stmt)
         return stmt
 
+    def break_stmt(self, span: ir.Span | None = None) -> ir.BreakStmt:
+        """Create break statement and emit it.
+
+        Break statement exits the nearest enclosing loop.
+
+        Args:
+            span: Optional explicit span. If None, captured from call site.
+
+        Returns:
+            BreakStmt: The created break statement
+        """
+        actual_span = span if span is not None else self._capture_call_span()
+        stmt = ir.BreakStmt(actual_span)
+        self._builder.emit(stmt)
+        return stmt
+
+    def continue_stmt(self, span: ir.Span | None = None) -> ir.ContinueStmt:
+        """Create continue statement and emit it.
+
+        Continue statement skips to the next iteration of the nearest enclosing loop.
+
+        Args:
+            span: Optional explicit span. If None, captured from call site.
+
+        Returns:
+            ContinueStmt: The created continue statement
+        """
+        actual_span = span if span is not None else self._capture_call_span()
+        stmt = ir.ContinueStmt(actual_span)
+        self._builder.emit(stmt)
+        return stmt
+
     # ========== Context State Queries ==========
 
     def in_function(self) -> bool:

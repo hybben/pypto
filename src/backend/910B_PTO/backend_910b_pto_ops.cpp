@@ -682,6 +682,27 @@ REGISTER_BACKEND_OP(Backend910B_PTO, "block.get_subblock_idx")
       return MakeBlockGetSubblockIdxIdxCodegenPTO(op, codegen);
     });
 
+// Helper function for block.get_block_num
+static std::string MakeBlockGetBlockNumCodegenPTO(const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+  CHECK(op->args_.size() == 0) << "block.get_block_num requires no arguments";
+
+  // Create a new SSA variable for the scalar result
+  std::string result = codegen.NewTemp();
+  codegen.Emit(result + " = pto.get_block_num");
+
+  // Register the result variable mapping
+  codegen.SetVarMlirName(codegen.GetCurrentResultVarName(), result);
+
+  return "";
+}
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "block.get_block_num")
+    .set_pipe(ir::PipeType::V)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeBlockGetBlockNumCodegenPTO(op, codegen);
+    });
+
 // Helper function for block.index_cast
 static std::string MakeBlockIndexCastCodegenPTO(const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
   auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);

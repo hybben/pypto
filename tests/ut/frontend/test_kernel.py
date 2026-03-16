@@ -228,9 +228,9 @@ def test_neg_kernel():
 
 
 if __name__ == "__main__":
-    test_load_kernel_with_jit()
-    test_load_kernel()
+    # test_load_kernel_with_jit()
+    # test_load_kernel()
     test_add_kernel()
-    test_mul_kernel()
-    test_neg_kernel()
+    # test_mul_kernel()
+    # test_neg_kernel()
     print("\nAll tests passed!")

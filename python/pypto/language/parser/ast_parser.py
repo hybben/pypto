@@ -267,6 +267,10 @@ class ASTParser:
             self.parse_with_statement(stmt)
         elif isinstance(stmt, ast.Return):
             self.parse_return(stmt)
+        elif isinstance(stmt, ast.Break):
+            self.parse_break(stmt)
+        elif isinstance(stmt, ast.Continue):
+            self.parse_continue(stmt)
         elif isinstance(stmt, ast.Expr):
             self.parse_evaluation_statement(stmt)
         elif isinstance(stmt, ast.Pass):
@@ -276,7 +280,7 @@ class ASTParser:
                 f"Unsupported statement type: {type(stmt).__name__}",
                 span=self.span_tracker.get_span(stmt),
                 hint="Only assignments, for loops, while loops, if statements, "
-                "with statements, and returns are supported in DSL functions",
+                "with statements, returns, break, and continue are supported in DSL functions",
             )
 
     def parse_annotated_assignment(self, stmt: ast.AnnAssign) -> None:
@@ -1198,7 +1202,7 @@ class ASTParser:
     def parse_return(self, stmt: ast.Return) -> None:
         """Parse return statement.
 
-        In inline mode, captures the return expression instead of emitting ReturnStmt.
+        In inline mode, captures return expression instead of emitting ReturnStmt.
 
         Args:
             stmt: Return AST node
@@ -1229,6 +1233,24 @@ class ASTParser:
             # Single return value
             return_expr = self.parse_expression(stmt.value)
             self.builder.return_stmt([return_expr], span)
+
+    def parse_break(self, stmt: ast.Break) -> None:
+        """Parse break statement.
+
+        Args:
+            stmt: Break AST node
+        """
+        span = self.span_tracker.get_span(stmt)
+        self.builder.break_stmt(span)
+
+    def parse_continue(self, stmt: ast.Continue) -> None:
+        """Parse continue statement.
+
+        Args:
+            stmt: Continue AST node
+        """
+        span = self.span_tracker.get_span(stmt)
+        self.builder.continue_stmt(span)
 
     def parse_evaluation_statement(self, stmt: ast.Expr) -> None:
         """Parse evaluation statement (EvalStmt).

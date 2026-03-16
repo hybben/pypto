@@ -310,6 +310,26 @@ void BindIRBuilder(nb::module_& m) {
            "Raises:\n"
            "    RuntimeError: If not inside a valid context")
 
+       .def("break_", &IRBuilder::Break, nb::arg("span"),
+            "Create a break statement and emit it.\n\n"
+            "Convenience method that creates and emits a break statement.\n\n"
+            "Args:\n"
+            "    span: Source location for break statement\n\n"
+            "Returns:\n"
+            "    BreakStmt: The created break statement\n\n"
+            "Raises:\n"
+            "    RuntimeError: If not inside a valid context")
+
+       .def("continue_", &IRBuilder::Continue, nb::arg("span"),
+            "Create a continue statement and emit it.\n\n"
+            "Convenience method that creates and emits a continue statement.\n\n"
+            "Args:\n"
+            "    span: Source location for continue statement\n\n"
+            "Returns:\n"
+            "    ContinueStmt: The created continue statement\n\n"
+            "Raises:\n"
+            "    RuntimeError: If not inside a valid context")
+
       // Context state queries
       .def("in_function", &IRBuilder::InFunction,
            "Check if currently inside a function.\n\n"

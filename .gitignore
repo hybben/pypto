@@ -138,6 +138,7 @@ dmypy.json
 
 # Claude settings (contains auth tokens)
 .claude/settings.local.json
+CLAUDE.md
 
 # Known issues tracking (local-only, per-developer)
 KNOWN_ISSUES.md

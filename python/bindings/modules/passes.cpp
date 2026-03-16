@@ -207,6 +207,13 @@ void BindPass(nb::module_& m) {
       .value("CALL_IN_UNARY_EXPR", nested_call::ErrorType::CALL_IN_UNARY_EXPR,
              "Call expression appears in unary expression operand");
 
+  passes.def("lower_break_continue", &pass::LowerBreakContinue,
+             "Create a pass that lowers break/continue statements to structured control flow\n\n"
+             "Transforms BreakStmt and ContinueStmt into nested scf.if blocks before codegen.\n"
+             "Must run before convert_to_ssa and before code generation.\n\n"
+             "Returns:\n"
+             "    Pass: The lowering pass");
+
   passes.def("split_chunked_loops", &pass::SplitChunkedLoops,
              "Create a pass that splits chunked loops into nested loops");
   passes.def("interchange_chunk_loops", &pass::InterchangeChunkLoops,

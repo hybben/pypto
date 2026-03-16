@@ -330,6 +330,28 @@ def get_subblock_idx(span: Span | None = None) -> Call:
     return _ir_core.create_op_call("block.get_subblock_idx", [], {}, actual_span)
 
 
+def get_block_num(span: Span | None = None) -> Call:
+    """Get the current block number.
+
+    This operation returns the number of the current block. It is typically
+    used in block-level programming to identify which block of data is being processed.
+
+    Args:
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression that returns a UINT64 scalar representing the block number
+
+    Example:
+        >>> block_num = pl.block.get_block_num()
+        >>> if block_num < 5:
+        >>>     # Process first 5 blocks differently
+        >>>     ...
+    """
+    actual_span = _get_span_or_capture(span)
+    return _ir_core.create_op_call("block.get_block_num", [], {}, actual_span)
+
+
 def index_cast(idx: Expr, span: Span | None = None) -> Call:
     """Cast scalar to index type.
 

@@ -234,6 +234,19 @@ Pass ConvertTensorToBlockOps();
 Pass RunVerifier(const std::vector<std::string>& disabled_rules = {});
 
 /**
+ * @brief Create a pass that lowers break/continue statements to structured control flow
+ *
+ * Transforms BreakStmt and ContinueStmt into nested scf.if blocks suitable for MLIR codegen.
+ * - continue: wrapped in if(!cond) guard over remaining statements
+ * - break (for): adds a _can_continue boolean iter_arg; body guarded by scf.if(_can_continue)
+ * - break (while): adds a _can_continue iter_arg as sole before-region condition;
+ *     original condition checked via scf.if at the start of the do-region (no And/Or/Not)
+ *
+ * Must run before ConvertToSSA and before codegen.
+ */
+Pass LowerBreakContinue();
+
+/**
  * @brief Create a pass that flattens nested call expressions
  */
 Pass FlattenCallExpr();

@@ -26,6 +26,7 @@ __all__ = [
     "full",
     "fillpad",
     "get_block_idx",
+    "get_block_num",
     "get_subblock_idx",
     "index_cast",
     "add",
@@ -332,8 +333,29 @@ def get_subblock_idx() -> Scalar:
         >>> if subblock_idx < 5:
         >>>     # Process first 5 subblocks differently
         >>>     ...
+        >>>     ...
     """
     call_expr = _ir_ops.get_subblock_idx()
+    return Scalar(expr=call_expr)
+
+
+def get_block_num() -> Scalar:
+    """Get the current block number.
+
+    This operation returns the number of the current block. It is typically
+    used in block-level programming to identify which block of data is being processed.
+
+    Returns:
+        Scalar wrapping the get_block_num operation (UINT64 type)
+
+    Example:
+        >>> block_num = pl.block.get_block_num()
+        >>> if block_num < 5:
+        >>>     # Process first 5 blocks differently
+        >>>     ...
+        >>>     ...
+    """
+    call_expr = _ir_ops.get_block_num()
     return Scalar(expr=call_expr)
 
 

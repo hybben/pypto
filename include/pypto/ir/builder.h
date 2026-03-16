@@ -391,6 +391,28 @@ class IRBuilder {
    */
   ReturnStmtPtr Return(const Span& span);
 
+  /**
+   * @brief Create a break statement and emit it
+   *
+   * Convenience method that creates a break statement and emits it.
+   *
+   * @param span Source location for break statement
+   * @return The created break statement
+   * @throws RuntimeError if not inside a valid context
+   */
+  BreakStmtPtr Break(const Span& span);
+
+  /**
+   * @brief Create a continue statement and emit it
+   *
+   * Convenience method that creates a continue statement and emits it.
+   *
+   * @param span Source location for continue statement
+   * @return The created continue statement
+   * @throws RuntimeError if not inside a valid context
+   */
+  ContinueStmtPtr Continue(const Span& span);
+
   // ========== Context State Queries ==========
 
   /**

@@ -389,6 +389,15 @@ REGISTER_OP("block.get_block_idx")
       return DeduceBlockGetBlockIdxType(args, kwargs, "block.get_block_idx");
     });
 
+REGISTER_OP("block.get_block_num")
+    .set_op_category("BlockOp")
+    .set_description("Get the current block number")
+    .no_argument()
+    .f_deduce_type([](const std::vector<ExprPtr>& args,
+                      const std::vector<std::pair<std::string, std::any>>& kwargs) {
+      return DeduceBlockGetBlockIdxType(args, kwargs, "block.get_block_num");
+    });
+
 REGISTER_OP("block.get_subblock_idx")
     .set_op_category("BlockOp")
     .set_description("Get the current subblock index")

@@ -643,28 +643,41 @@ class SSAConverter : public IRMutator {
 
   /**
    * @brief Append a YieldStmt to a statement
+   *
+   * When the statement already ends with a YieldStmt (e.g. from LowerBreakContinue),
+   * the new phi values are prepended to the existing yield values so that the merged
+   * YieldStmt matches the return_vars order: [phi_vars..., existing_rvs...].
    */
   StmtPtr AppendYield(const StmtPtr& stmt, const std::vector<ExprPtr>& values, const Span& span) {
     if (values.empty()) return stmt;
 
-    auto yield = std::make_shared<YieldStmt>(values, span);
-
     if (auto seq = As<SeqStmts>(stmt)) {
-      // Check if last statement is already a yield
-      if (!seq->stmts_.empty() && As<YieldStmt>(seq->stmts_.back())) {
-        // Replace last yield
-        std::vector<StmtPtr> new_stmts(seq->stmts_.begin(), seq->stmts_.end() - 1);
-        new_stmts.push_back(yield);
-        return std::make_shared<SeqStmts>(new_stmts, seq->span_);
+      if (!seq->stmts_.empty()) {
+        if (auto existing_yield = As<YieldStmt>(seq->stmts_.back())) {
+          // Merge: new phi values first, then existing values
+          std::vector<ExprPtr> merged = values;
+          merged.insert(merged.end(), existing_yield->value_.begin(), existing_yield->value_.end());
+          auto merged_yield = std::make_shared<YieldStmt>(merged, span);
+          std::vector<StmtPtr> new_stmts(seq->stmts_.begin(), seq->stmts_.end() - 1);
+          new_stmts.push_back(merged_yield);
+          return std::make_shared<SeqStmts>(new_stmts, seq->span_);
+        }
       }
-      // Append yield
+      // No trailing yield — just append
       std::vector<StmtPtr> new_stmts = seq->stmts_;
-      new_stmts.push_back(yield);
+      new_stmts.push_back(std::make_shared<YieldStmt>(values, span));
       return std::make_shared<SeqStmts>(new_stmts, seq->span_);
     }
 
-    // Wrap single statement and yield in SeqStmts
-    return std::make_shared<SeqStmts>(std::vector<StmtPtr>{stmt, yield}, span);
+    if (auto existing_yield = As<YieldStmt>(stmt)) {
+      // Merge: new phi values first, then existing values
+      std::vector<ExprPtr> merged = values;
+      merged.insert(merged.end(), existing_yield->value_.begin(), existing_yield->value_.end());
+      return std::make_shared<YieldStmt>(merged, span);
+    }
+
+    // No existing yield — wrap statement and new yield in SeqStmts
+    return std::make_shared<SeqStmts>(std::vector<StmtPtr>{stmt, std::make_shared<YieldStmt>(values, span)}, span);
   }
 
   /**

@@ -35,6 +35,7 @@
 #include "pypto/ir/program.h"
 #include "pypto/ir/scalar_expr.h"
 #include "pypto/ir/stmt.h"
+#include "pypto/ir/transforms/passes.h"
 #include "pypto/ir/type.h"
 
 namespace pypto {
@@ -50,9 +51,11 @@ using ir::ForStmtPtr;
 using ir::FunctionPtr;
 using ir::IfStmtPtr;
 using ir::MemRefPtr;
+using ir::OpStmtsPtr;
 using ir::ProgramPtr;
 using ir::PtrType;
 using ir::ScalarType;
+using ir::SeqStmtsPtr;
 using ir::StmtPtr;
 using ir::TensorType;
 using ir::TileType;
@@ -163,6 +166,18 @@ PTOCodegen::PTOCodegen(const backend::Backend* backend) : backend_(backend) {
 // ========================================================================
 
 std::string PTOCodegen::Generate(const ProgramPtr& program) {
+  // Lower break/continue to structured control flow before emitting MLIR.
+  // This pass is idempotent: programs without break/continue are unchanged.
+  // Must run BEFORE ConvertToSSA: continue/break lowering restructures the loop
+  // body (e.g. wrapping remaining stmts in an else-branch) while variables are
+  // still in non-SSA form. ConvertToSSA then correctly produces iter_args and
+  // scf.yield for the restructured body.
+  ir::ProgramPtr lowered = ir::pass::LowerBreakContinue()(program);
+
+  // Convert to SSA form so that loop-carried variables (e.g. `loop = loop + 1`
+  // inside a while body) become proper scf.while iter_args with scf.yield.
+  ir::ProgramPtr ssa_program = ir::pass::ConvertToSSA()(lowered);
+
   stream_.str("");
   stream_.clear();
   constants_section_.str("");
@@ -176,7 +191,7 @@ std::string PTOCodegen::Generate(const ProgramPtr& program) {
   stream_ << "module {\n";
   indent_level_++;
 
-  for (const auto& [gvar, func] : program->functions_) {
+  for (const auto& [gvar, func] : ssa_program->functions_) {
     if (func->func_type_ == ir::FunctionType::Orchestration) {
       throw pypto::ValueError(
           "PTO backend does not support Orchestration functions. "
@@ -961,7 +976,7 @@ void PTOCodegen::VisitExpr_(const ir::ConstFloatPtr& op) {
 
 void PTOCodegen::VisitExpr_(const ir::ConstBoolPtr& op) {
   std::string result = NewTemp();
-  std::string val = op->value_ ? "true" : "false";
+  std::string val = op->value_ ? "1" : "0";
   Emit(result + " = arith.constant " + val + " : i1");
   current_expr_value_ = result;
 }
@@ -994,6 +1009,18 @@ void PTOCodegen::VisitExpr_(const ir::GePtr& op) { VisitCmpExpr(op, "sge"); }
 void PTOCodegen::VisitExpr_(const ir::MaxPtr& op) { VisitBinaryArithExpr(op, "arith.maxsi", "arith.maximumf"); }
 void PTOCodegen::VisitExpr_(const ir::MinPtr& op) { VisitBinaryArithExpr(op, "arith.minsi", "arith.minimumf"); }
 
+void PTOCodegen::VisitExpr_(const ir::NotPtr& op) {
+  VisitExpr(op->operand_);
+  std::string operand = current_expr_value_;
+  current_expr_value_ = "";
+
+  // Logical NOT: arith.xori %val, %true : i1
+  std::string true_val = NewTemp();
+  Emit(true_val + " = arith.constant 1 : i1");
+  std::string result = NewTemp();
+  Emit(result + " = arith.xori " + operand + ", " + true_val + " : i1");
+  current_expr_value_ = result;
+}
 
 // ========================================================================
 // Statement visitors - Control flow
@@ -1260,28 +1287,197 @@ void PTOCodegen::VisitStmt_(const ForStmtPtr& op) {
     VisitStmt(op->body_);
 
     // Emit scf.yield from yield_buffer_
-    if (!yield_buffer_.empty()) {
-      std::ostringstream yield_oss;
-      yield_oss << "scf.yield ";
-      for (size_t i = 0; i < yield_buffer_.size(); ++i) {
-        if (i > 0) yield_oss << ", ";
-        yield_oss << yield_buffer_[i];
-      }
-      yield_oss << " : ";
-      for (size_t i = 0; i < iter_arg_types.size(); ++i) {
-        if (i > 0) yield_oss << ", ";
-        yield_oss << iter_arg_types[i];
-      }
-      Emit(yield_oss.str());
+    CHECK(!yield_buffer_.empty())
+        << "ForStmt with iter_args must have a pl.yield_() statement in the body";
+    std::ostringstream yield_oss;
+    yield_oss << "scf.yield ";
+    for (size_t i = 0; i < yield_buffer_.size(); ++i) {
+      if (i > 0) yield_oss << ", ";
+      yield_oss << yield_buffer_[i];
     }
-    CHECK(yield_buffer_.size() == iter_arg_types.size())
-        << "ForStmt yield count (" << yield_buffer_.size() << ") must match iter_args ("
-        << iter_arg_types.size() << ")";
+    yield_oss << " : ";
+    for (size_t i = 0; i < iter_arg_types.size(); ++i) {
+      if (i > 0) yield_oss << ", ";
+      yield_oss << iter_arg_types[i];
+    }
+    Emit(yield_oss.str());
     yield_buffer_.clear();
 
     indent_level_--;
     Emit("}");
   }
+}
+
+void PTOCodegen::VisitStmt_(const ir::WhileStmtPtr& op) {
+  INTERNAL_CHECK(op != nullptr) << "Internal error: null WhileStmt";
+  INTERNAL_CHECK(op->condition_ != nullptr) << "Internal error: WhileStmt has null condition";
+  INTERNAL_CHECK(op->body_ != nullptr) << "Internal error: WhileStmt has null body";
+
+  CHECK(op->iter_args_.size() == op->return_vars_.size())
+      << "WhileStmt iter_args size (" << op->iter_args_.size() << ") must equal return_vars size ("
+      << op->return_vars_.size() << ")";
+
+  if (op->iter_args_.empty()) {
+    // Standard MLIR scf.while with no iter_args:
+    //   scf.while : () -> () {
+    //     %cond = ...
+    //     scf.condition(%cond)
+    //   } do {
+    //   ^bb0:
+    //     ...body...
+    //     scf.yield
+    //   }
+    // Note: "before" region has no ^bb0 header (no block args).
+    //       "do" region has explicit ^bb0 even with no args.
+    Emit("scf.while : () -> () {");
+    indent_level_++;
+    VisitExpr(op->condition_);
+    std::string condition = current_expr_value_;
+    current_expr_value_ = "";
+    Emit("scf.condition(" + condition + ")");
+    indent_level_--;
+    Emit("} do {");
+    indent_level_++;
+    Emit("^bb0:");
+    VisitStmt(op->body_);
+    Emit("scf.yield");
+    indent_level_--;
+    Emit("}");
+  } else {
+    // Standard MLIR scf.while with iter_args:
+    //   %ret0, %ret1 = scf.while (%arg0 = %init0, %arg1 = %init1)
+    //       : (type0, type1) -> (type0, type1) {
+    //     %cond = ...                               ← NO ^bb0 header; args are implicit
+    //     scf.condition(%cond) %arg0, %arg1 : type0, type1
+    //   } do {
+    //   ^bb0(%arg0: type0, %arg1: type1):           ← explicit ^bb0 required
+    //     ...body...
+    //     scf.yield %new0, %new1 : type0, type1
+    //   }
+    std::vector<std::string> init_values;
+    std::vector<std::string> iter_arg_names;
+    std::vector<std::string> iter_arg_types;
+
+    for (const auto& iter_arg : op->iter_args_) {
+      VisitExpr(iter_arg->initValue_);
+      init_values.push_back(current_expr_value_);
+      current_expr_value_ = "";
+
+      std::string iter_name = NewTemp();
+      var_to_mlir_[iter_arg->name_] = iter_name;
+      iter_arg_names.push_back(iter_name);
+
+      std::string type_str = "index";
+      if (auto scalar_type = As<ScalarType>(iter_arg->GetType())) {
+        if (scalar_type->dtype_ == DataType::BOOL) {
+          type_str = "i1";
+        } else if (scalar_type->dtype_.IsFloat()) {
+          type_str = GetTypeString(scalar_type->dtype_);
+        }
+      }
+      iter_arg_types.push_back(type_str);
+    }
+
+    // Register return_vars SSA names
+    std::vector<std::string> return_var_names;
+    for (const auto& return_var : op->return_vars_) {
+      std::string ret_name = NewTemp();
+      var_to_mlir_[return_var->name_] = ret_name;
+      return_var_names.push_back(ret_name);
+    }
+
+    // Build type list string (shared by header and both regions)
+    std::ostringstream type_oss;
+    for (size_t i = 0; i < iter_arg_types.size(); ++i) {
+      if (i > 0) type_oss << ", ";
+      type_oss << iter_arg_types[i];
+    }
+    std::string type_list = type_oss.str();
+
+    // Build ^bb0(arg: type, ...) header string (shared by both regions)
+    std::ostringstream bb0_oss;
+    bb0_oss << "^bb0(";
+    for (size_t i = 0; i < iter_arg_names.size(); ++i) {
+      if (i > 0) bb0_oss << ", ";
+      bb0_oss << iter_arg_names[i] << ": " << iter_arg_types[i];
+    }
+    bb0_oss << "):";
+    std::string bb0_header = bb0_oss.str();
+
+    // Emit: %ret0, %ret1 = scf.while (%arg0 = %init0) : (type0) -> (type0) {
+    std::ostringstream header_oss;
+    for (size_t i = 0; i < return_var_names.size(); ++i) {
+      if (i > 0) header_oss << ", ";
+      header_oss << return_var_names[i];
+    }
+    header_oss << " = scf.while (";
+    for (size_t i = 0; i < iter_arg_names.size(); ++i) {
+      if (i > 0) header_oss << ", ";
+      header_oss << iter_arg_names[i] << " = " << init_values[i];
+    }
+    header_oss << ") : (" << type_list << ") -> (" << type_list << ") {";
+    Emit(header_oss.str());
+    indent_level_++;
+
+    // "before" region: evaluate condition then scf.condition — no ^bb0 header, iter_args implicit
+    VisitExpr(op->condition_);
+    std::string condition = current_expr_value_;
+    current_expr_value_ = "";
+    std::ostringstream cond_oss;
+    cond_oss << "scf.condition(" << condition << ") ";
+    for (size_t i = 0; i < iter_arg_names.size(); ++i) {
+      if (i > 0) cond_oss << ", ";
+      cond_oss << iter_arg_names[i];
+    }
+    cond_oss << " : " << type_list;
+    Emit(cond_oss.str());
+    indent_level_--;
+
+    // "do" region: body, then scf.yield new_values : types
+    Emit("} do {");
+    indent_level_++;
+    Emit(bb0_header);
+
+    yield_buffer_.clear();
+    VisitStmt(op->body_);
+
+    CHECK(!yield_buffer_.empty())
+        << "WhileStmt with iter_args must have a pl.yield_() statement in the body";
+    std::ostringstream yield_oss;
+    yield_oss << "scf.yield ";
+    for (size_t i = 0; i < yield_buffer_.size(); ++i) {
+      if (i > 0) yield_oss << ", ";
+      yield_oss << yield_buffer_[i];
+    }
+    yield_oss << " : " << type_list;
+    Emit(yield_oss.str());
+    yield_buffer_.clear();
+
+    indent_level_--;
+    Emit("}");
+  }
+}
+
+void PTOCodegen::VisitStmt_(const ir::SeqStmtsPtr& op) {
+  for (const auto& stmt : op->stmts_) {
+    VisitStmt(stmt);
+  }
+}
+
+void PTOCodegen::VisitStmt_(const ir::OpStmtsPtr& op) {
+  for (const auto& stmt : op->stmts_) {
+    VisitStmt(stmt);
+  }
+}
+
+void PTOCodegen::VisitStmt_(const ir::BreakStmtPtr& op) {
+  INTERNAL_CHECK(false) << "Internal error: BreakStmt reached PTOCodegen. "
+                        << "LowerBreakContinue pass should have eliminated all BreakStmts before codegen.";
+}
+
+void PTOCodegen::VisitStmt_(const ir::ContinueStmtPtr& op) {
+  INTERNAL_CHECK(false) << "Internal error: ContinueStmt reached PTOCodegen. "
+                        << "LowerBreakContinue pass should have eliminated all ContinueStmts before codegen.";
 }
 
 }  // namespace codegen

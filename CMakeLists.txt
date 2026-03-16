@@ -125,6 +125,7 @@ set(PYPTO_SOURCES
     src/ir/transforms/dependency_analyzer.cpp
     src/ir/transforms/flatten_call_expr_pass.cpp
     src/ir/transforms/flatten_single_stmt_pass.cpp
+    src/ir/transforms/lower_break_continue_pass.cpp
     src/ir/transforms/init_memref.cpp
     src/ir/transforms/ir_property.cpp
     src/ir/transforms/insert_sync_pass.cpp

@@ -505,6 +505,18 @@ ReturnStmtPtr IRBuilder::Return(const Span& span) {
   return return_stmt;
 }
 
+BreakStmtPtr IRBuilder::Break(const Span& span) {
+  auto break_stmt = std::make_shared<BreakStmt>(span);
+  Emit(break_stmt);
+  return break_stmt;
+}
+
+ContinueStmtPtr IRBuilder::Continue(const Span& span) {
+  auto continue_stmt = std::make_shared<ContinueStmt>(span);
+  Emit(continue_stmt);
+  return continue_stmt;
+}
+
 // ========== Context State Queries ==========
 
 BuildContext* IRBuilder::CurrentContext() {
