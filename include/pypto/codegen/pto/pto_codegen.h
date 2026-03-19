@@ -187,6 +187,7 @@ class PTOCodegen : public CodegenBase {
   void VisitStmt_(const ir::OpStmtsPtr& op) override;
   void VisitStmt_(const ir::BreakStmtPtr& op) override;
   void VisitStmt_(const ir::ContinueStmtPtr& op) override;
+  void VisitStmt_(const ir::ReturnStmtPtr& op) override;
 
   // Override visitor methods for code generation - Expressions
   void VisitExpr_(const ir::CallPtr& op) override;
@@ -216,6 +217,16 @@ class PTOCodegen : public CodegenBase {
    * @brief Generate PTO-ISA MLIR for a single function
    */
   void GenerateFunction(const ir::FunctionPtr& func);
+
+  /**
+   * @brief Generate MLIR for a Helper-type function (scalar params, func.call target)
+   */
+  void GenerateHelperFunction(const ir::FunctionPtr& func);
+
+  /**
+   * @brief Emit a func.call instruction for a user-defined function call
+   */
+  void EmitFuncCall(const ir::CallPtr& op);
 
   /**
    * @brief Build variable name to MemRef mapping from function body
@@ -301,6 +312,7 @@ class PTOCodegen : public CodegenBase {
 
   // Control flow expression result communication
   std::string current_expr_value_;         ///< SSA name from expression visitors
+  std::string last_assigned_temp_;         ///< Last SSA name from NewTemp() — used by VisitExpr_(Call)
   std::vector<std::string> yield_buffer_;  ///< Temporary storage for yielded values
 
   /// Emit an arith binary op, return SSA result name

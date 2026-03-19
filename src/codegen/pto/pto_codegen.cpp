@@ -207,8 +207,13 @@ std::string PTOCodegen::Generate(const ProgramPtr& program) {
 }
 
 void PTOCodegen::GenerateFunction(const FunctionPtr& func) {
+  if (func->func_type_ == ir::FunctionType::Helper) {
+    GenerateHelperFunction(func);
+    return;
+  }
   current_function_ = func;
   temp_counter_ = 0;
+  last_assigned_temp_ = "";
   var_to_mlir_.clear();
   tensor_to_view_.clear();
   memref_to_mlir_.clear();
@@ -595,11 +600,21 @@ void PTOCodegen::VisitExpr_(const CallPtr& op) {
   CHECK(backend_ != nullptr) << "Backend must not be null; use PTOCodegen(backend) or default backend";
   const auto* op_info = backend_->GetOpInfo(op_name);
   if (op_info == nullptr) {
-    ThrowNoCodegenForCall(op_name);
+    // Not a built-in op — treat as a user-defined function call (func.call)
+    EmitFuncCall(op);
+    return;
   }
+
+  last_assigned_temp_ = "";
   std::string mlir_line = op_info->codegen_func(op, *this);
   if (!mlir_line.empty()) {
     Emit(mlir_line);
+  }
+  // Always propagate the SSA result name allocated by the op codegen function.
+  // This ensures statement-ops (e.g. get_block_idx) work correctly as sub-expressions
+  // in binary operations where current_expr_value_ may hold a stale LHS value.
+  if (!last_assigned_temp_.empty()) {
+    current_expr_value_ = last_assigned_temp_;
   }
 }
 
@@ -653,7 +668,11 @@ std::string PTOCodegen::GetVarName(const VarPtr& var) {
   return "";
 }
 
-std::string PTOCodegen::NewTemp() { return "%" + std::to_string(temp_counter_++); }
+std::string PTOCodegen::NewTemp() {
+  std::string name = "%" + std::to_string(temp_counter_++);
+  last_assigned_temp_ = name;
+  return name;
+}
 
 void PTOCodegen::RegisterVarToMlir(const std::string& var_name, const std::string& mlir_name) {
   var_to_mlir_[var_name] = mlir_name;
@@ -1566,6 +1585,273 @@ void PTOCodegen::VisitStmt_(const ir::BreakStmtPtr& op) {
 void PTOCodegen::VisitStmt_(const ir::ContinueStmtPtr& op) {
   INTERNAL_CHECK(false) << "Internal error: ContinueStmt reached PTOCodegen. "
                         << "LowerBreakContinue pass should have eliminated all ContinueStmts before codegen.";
+}
+
+// ========================================================================
+// Helper function generation (FunctionType::Helper)
+// ========================================================================
+
+void PTOCodegen::GenerateHelperFunction(const FunctionPtr& func) {
+  current_function_ = func;
+  temp_counter_ = 0;
+  last_assigned_temp_ = "";
+  var_to_mlir_.clear();
+  tensor_to_view_.clear();
+  memref_to_mlir_.clear();
+  var_to_memref_.clear();
+  memref_to_tile_type_.clear();
+  emitted_constants_.clear();
+  emitted_i64_constants_.clear();
+  constants_section_.str("");
+  constants_section_.clear();
+  current_expr_value_ = "";
+
+  // Pre-register tile param memrefs so body ops can resolve them via GetExprTypeAnnotation
+  for (size_t i = 0; i < func->params_.size(); ++i) {
+    const auto& param = func->params_[i];
+    std::string arg_name = "%arg" + std::to_string(i);
+    if (auto tile_type = As<TileType>(param->GetType())) {
+      if (tile_type->memref_.has_value()) {
+        const ir::MemRef* memref = tile_type->memref_.value().get();
+        memref_to_mlir_[memref] = arg_name;
+        var_to_memref_[param->name_] = memref;
+        memref_to_tile_type_[memref] = tile_type;
+      } else {
+        // TileType without memref (from DSL annotation): build type string directly
+        std::string dtype_str = "f32";
+        int64_t rows = 32, cols = 32;
+        ir::TileLayout blayout = ir::TileLayout::row_major;
+        ir::TileLayout slayout = ir::TileLayout::none_box;
+        uint64_t fractal = 512;
+        ir::TilePad pad = ir::TilePad::null;
+        int64_t v_row = 32, v_col = 32;
+        bool v_row_dynamic = false, v_col_dynamic = false;
+        ExtractTileTypeInfo(*tile_type, *this, dtype_str, rows, cols, blayout, slayout, fractal, pad,
+                            v_row, v_col, v_row_dynamic, v_col_dynamic);
+        std::string loc = "vec";  // default memory space for annotation-only tile params
+        var_to_mlir_[param->name_] = arg_name;
+        extra_tile_buf_types_[arg_name] = FormatTileBufTypeString(
+            loc, dtype_str, rows, cols, blayout, slayout, fractal, pad, v_row, v_col,
+            v_row_dynamic, v_col_dynamic);
+      }
+    } else if (auto tensor_type = As<TensorType>(param->GetType())) {
+      std::string view_name = NewTemp();
+      tensor_to_view_[param->name_] = view_name;
+    }
+  }
+
+  // Emit: func.func @name(%arg0: type, ...) -> ret_type {
+  stream_ << GetIndent() << "func.func @" << func->name_ << "(";
+  for (size_t i = 0; i < func->params_.size(); ++i) {
+    if (i > 0) stream_ << ", ";
+    const auto& param = func->params_[i];
+    std::string arg_name = "%arg" + std::to_string(i);
+    var_to_mlir_[param->name_] = arg_name;
+    if (auto tensor_type = As<TensorType>(param->GetType())) {
+      stream_ << arg_name << ": !pto.ptr<" << GetTypeString(tensor_type->dtype_) << ">";
+    } else if (auto tile_type = As<TileType>(param->GetType())) {
+      // Generate tile_buf type string; use memref's memory space if available,
+      // otherwise default to "vec" (the most common AICore vector memory space).
+      std::string dtype_str = "f32";
+      int64_t rows = 32, cols = 32;
+      ir::TileLayout blayout = ir::TileLayout::row_major;
+      ir::TileLayout slayout = ir::TileLayout::none_box;
+      uint64_t fractal = 512;
+      ir::TilePad pad = ir::TilePad::null;
+      int64_t v_row = 32, v_col = 32;
+      bool v_row_dynamic = false, v_col_dynamic = false;
+      ExtractTileTypeInfo(*tile_type, *this, dtype_str, rows, cols, blayout, slayout, fractal, pad,
+                          v_row, v_col, v_row_dynamic, v_col_dynamic);
+      std::string loc = tile_type->memref_.has_value()
+                            ? MemorySpaceToMLIR(tile_type->memref_.value()->memory_space_)
+                            : "vec";
+      stream_ << arg_name << ": "
+              << FormatTileBufTypeString(loc, dtype_str, rows, cols, blayout, slayout, fractal, pad,
+                                        v_row, v_col, v_row_dynamic, v_col_dynamic);
+    } else if (auto ptr_type = As<PtrType>(param->GetType())) {
+      stream_ << arg_name << ": !pto.ptr<" << GetTypeString(ptr_type->dtype_) << ">";
+    } else if (auto scalar_type = As<ScalarType>(param->GetType())) {
+      stream_ << arg_name << ": " << GetTypeString(scalar_type->dtype_);
+    } else {
+      stream_ << arg_name << ": index";
+    }
+  }
+  stream_ << ")";
+
+  if (!func->return_types_.empty()) {
+    stream_ << " -> ";
+    const auto& rt = func->return_types_[0];
+    if (auto scalar_type = As<ScalarType>(rt)) {
+      stream_ << GetTypeString(scalar_type->dtype_);
+    } else if (auto tensor_type = As<TensorType>(rt)) {
+      stream_ << GetTensorViewTypeString(tensor_type.get());
+    } else if (auto tile_type = As<TileType>(rt)) {
+      std::string dtype_str = "f32";
+      int64_t rows = 32, cols = 32;
+      ir::TileLayout blayout = ir::TileLayout::row_major;
+      ir::TileLayout slayout = ir::TileLayout::none_box;
+      uint64_t fractal = 512;
+      ir::TilePad pad = ir::TilePad::null;
+      int64_t v_row = 32, v_col = 32;
+      bool v_row_dynamic = false, v_col_dynamic = false;
+      ExtractTileTypeInfo(*tile_type, *this, dtype_str, rows, cols, blayout, slayout, fractal, pad,
+                          v_row, v_col, v_row_dynamic, v_col_dynamic);
+      std::string loc = tile_type->memref_.has_value()
+                            ? MemorySpaceToMLIR(tile_type->memref_.value()->memory_space_)
+                            : "vec";
+      stream_ << FormatTileBufTypeString(loc, dtype_str, rows, cols, blayout, slayout, fractal, pad,
+                                        v_row, v_col, v_row_dynamic, v_col_dynamic);
+    } else if (auto ptr_type = As<PtrType>(rt)) {
+      stream_ << "!pto.ptr<" << GetTypeString(ptr_type->dtype_) << ">";
+    } else {
+      stream_ << "index";
+    }
+  }
+  stream_ << " {\n";
+  indent_level_++;
+  function_body_indent_level_ = indent_level_;
+
+  // Emit make_tensor_view preamble for any TensorType params (reuses existing method)
+  EmitMakeTensorViews(func);
+
+  if (func->body_) {
+    // Capture body output in a temporary stream so we can emit constants first
+    std::ostringstream saved_stream;
+    saved_stream.swap(stream_);
+    VisitStmt(func->body_);
+    std::string body_content = stream_.str();
+    stream_.swap(saved_stream);
+    // Emit constants before body (constants may have been emitted during body traversal)
+    if (!constants_section_.str().empty()) {
+      stream_ << constants_section_.str();
+      constants_section_.str("");
+      constants_section_.clear();
+    }
+    stream_ << body_content;
+  }
+
+  // Add trailing func.return for void helpers that have no explicit return statement
+  if (func->return_types_.empty()) {
+    bool has_explicit_return = false;
+    if (auto seq = As<ir::SeqStmts>(func->body_)) {
+      if (!seq->stmts_.empty()) {
+        has_explicit_return = As<ir::ReturnStmt>(seq->stmts_.back()) != nullptr;
+      }
+    }
+    if (!has_explicit_return) {
+      stream_ << GetIndent() << "return\n";
+    }
+  }
+
+  indent_level_--;
+  stream_ << GetIndent() << "}\n";
+  function_body_indent_level_ = 0;
+}
+
+void PTOCodegen::EmitFuncCall(const CallPtr& op) {
+  std::vector<std::string> arg_codes;
+  std::vector<std::string> arg_type_strs;
+
+  for (const auto& arg : op->args_) {
+    arg_codes.push_back(GetExprAsCode(arg));
+    std::string type_str;
+    if (auto t = arg->GetType()) {
+      if (auto scalar_type = As<ScalarType>(t)) {
+        type_str = GetTypeString(scalar_type->dtype_);
+      } else if (auto tensor_type = As<TensorType>(t)) {
+        type_str = "!pto.ptr<" + GetTypeString(tensor_type->dtype_) + ">";
+      } else if (auto tile_type = As<TileType>(t)) {
+        type_str = GetExprTypeAnnotation(arg);
+        if (type_str.empty()) type_str = "index";
+      } else if (auto ptr_type = As<PtrType>(t)) {
+        type_str = "!pto.ptr<" + GetTypeString(ptr_type->dtype_) + ">";
+      } else {
+        type_str = "index";
+      }
+    } else {
+      type_str = "index";
+    }
+    arg_type_strs.push_back(type_str);
+  }
+
+  auto call_type = op->GetType();
+  bool is_void = !call_type
+      || (!As<ScalarType>(call_type) && !As<TensorType>(call_type)
+          && !As<TileType>(call_type) && !As<PtrType>(call_type));
+  std::ostringstream oss;
+  if (is_void) {
+    // void call: no result variable, no return type
+    oss << "func.call @" << op->op_->name_ << "(";
+    for (size_t i = 0; i < arg_codes.size(); ++i) {
+      if (i > 0) oss << ", ";
+      oss << arg_codes[i];
+    }
+    oss << ") : (";
+    for (size_t i = 0; i < arg_type_strs.size(); ++i) {
+      if (i > 0) oss << ", ";
+      oss << arg_type_strs[i];
+    }
+    oss << ") -> ()";
+    Emit(oss.str());
+    current_expr_value_ = "";
+  } else {
+    std::string ret_type = "index";  // fallback for unrecognized types
+    if (auto scalar_type = As<ScalarType>(call_type)) {
+      ret_type = GetTypeString(scalar_type->dtype_);
+    } else if (auto tensor_type = As<TensorType>(call_type)) {
+      ret_type = GetTensorViewTypeString(tensor_type.get());
+    } else if (auto tile_type = As<TileType>(call_type)) {
+      ret_type = GetTileBufTypeStringFromTileType(tile_type);
+    } else if (auto ptr_type = As<PtrType>(call_type)) {
+      ret_type = "!pto.ptr<" + GetTypeString(ptr_type->dtype_) + ">";
+    }
+    std::string result = NewTemp();
+    oss << result << " = func.call @" << op->op_->name_ << "(";
+    for (size_t i = 0; i < arg_codes.size(); ++i) {
+      if (i > 0) oss << ", ";
+      oss << arg_codes[i];
+    }
+    oss << ") : (";
+    for (size_t i = 0; i < arg_type_strs.size(); ++i) {
+      if (i > 0) oss << ", ";
+      oss << arg_type_strs[i];
+    }
+    oss << ") -> " << ret_type;
+    Emit(oss.str());
+    current_expr_value_ = result;
+  }
+}
+
+void PTOCodegen::VisitStmt_(const ir::ReturnStmtPtr& op) {
+  // For kernel functions (non-Helper), the trailing 'return' is emitted by
+  // GenerateFunction; we skip the ReturnStmt visitor to avoid double emission.
+  if (!current_function_ || current_function_->func_type_ != ir::FunctionType::Helper) {
+    return;
+  }
+  if (op->value_.empty()) {
+    Emit("return");
+    return;
+  }
+  std::string val = GetExprAsCode(op->value_[0]);
+  // Try GetExprTypeAnnotation first (handles tiles/tensors via lookup maps),
+  // then fall back to type-based dispatch for scalars.
+  std::string type_str = GetExprTypeAnnotation(op->value_[0]);
+  if (type_str.empty()) {
+    if (auto t = op->value_[0]->GetType()) {
+      if (auto scalar_type = As<ScalarType>(t)) {
+        type_str = GetTypeString(scalar_type->dtype_);
+      } else if (auto tensor_type = As<TensorType>(t)) {
+        type_str = GetTensorViewTypeString(tensor_type.get());
+      } else if (auto ptr_type = As<PtrType>(t)) {
+        type_str = "!pto.ptr<" + GetTypeString(ptr_type->dtype_) + ">";
+      } else {
+        type_str = "index";
+      }
+    } else {
+      type_str = "index";
+    }
+  }
+  Emit("return " + val + " : " + type_str);
 }
 
 }  // namespace codegen

@@ -42,7 +42,8 @@ namespace ir {
 enum class FunctionType : uint8_t {
   Opaque = 0,         ///< Default: unspecified function type
   Orchestration = 1,  ///< Host/AICPU control and coordination
-  InCore = 2          ///< AICore sub-graph execution
+  InCore = 2,         ///< AICore sub-graph execution
+  Helper = 3          ///< Scalar helper function callable from kernels (generates func.call)
 };
 
 /**
@@ -72,6 +73,8 @@ inline std::string FunctionTypeToString(FunctionType type) {
       return "Orchestration";
     case FunctionType::InCore:
       return "InCore";
+    case FunctionType::Helper:
+      return "Helper";
   }
   throw pypto::TypeError("Unknown FunctionType");
 }
@@ -89,6 +92,8 @@ inline FunctionType StringToFunctionType(const std::string& str) {
     return FunctionType::Orchestration;
   } else if (str == "InCore") {
     return FunctionType::InCore;
+  } else if (str == "Helper") {
+    return FunctionType::Helper;
   } else {
     throw pypto::TypeError("Unknown FunctionType: " + str);
   }

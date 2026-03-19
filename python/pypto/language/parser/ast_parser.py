@@ -10,6 +10,7 @@
 """AST parsing for converting Python DSL to IR builder calls."""
 
 import ast
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from pypto.ir import IRBuilder
@@ -115,6 +116,9 @@ class ASTParser:
         # Inline function expansion state
         self._inline_mode = False
         self._inline_return_expr: ir.Expr | None = None
+
+        # Cache for implicitly compiled functions (keyed by id(fn))
+        self._implicit_func_cache: dict[int, Any] = {}
 
         # Registry mapping tiling param names to their flattened field vars.
         # Scalar fields map to a single ir.Var; array fields map to list[ir.Var].
@@ -1636,7 +1640,7 @@ class ASTParser:
 
         # Handle bare-name calls to external ir.Function or InlineFunction
         if isinstance(func, ast.Name):
-            from .decorator import InlineFunction  # noqa: PLC0415 (circular import)
+            from .decorator import InlineFunction, KernelFunction  # noqa: PLC0415 (circular import)
 
             func_name = func.id
             resolved = self.expr_evaluator.closure_vars.get(func_name)
@@ -1644,6 +1648,21 @@ class ASTParser:
                 return self._parse_external_function_call(func_name, resolved, call)
             if isinstance(resolved, InlineFunction):
                 return self._parse_inline_call(func_name, resolved, call)
+            if isinstance(resolved, KernelFunction):
+                return self._parse_func_call(func_name, resolved, call)
+            # Implicit func: annotated → func.call, unannotated → auto-inline
+            if callable(resolved) and not isinstance(resolved, type):
+                import inspect as _inspect  # noqa: PLC0415
+                hints = getattr(resolved, "__annotations__", {})
+                params = [p for p in _inspect.signature(resolved).parameters if p != "self"]
+                # Annotated: all params have hints, OR no params but has return hint
+                fully_annotated = (
+                    (params and all(p in hints for p in params))
+                    or (not params and "return" in hints)
+                )
+                if fully_annotated:
+                    return self._implicit_func_call(func_name, resolved, call)
+                return self._auto_inline_call(func_name, resolved, call)
 
         raise UnsupportedFeatureError(
             f"Unsupported function call: {ast.unparse(call)}",
@@ -1886,6 +1905,227 @@ class ASTParser:
             )
 
         return return_expr
+
+    @staticmethod
+    def _check_no_nested_calls(func_def: ast.FunctionDef, func_name: str, span: Any) -> None:
+        """Raise UnsupportedFeatureError if the function body contains bare-name function calls."""
+        for node in ast.walk(func_def):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                raise UnsupportedFeatureError(
+                    f"Auto-inlined function '{func_name}' cannot call other functions "
+                    f"(found call to '{node.func.id}'). "
+                    f"Add type annotations to use func.call, or use @pl.inline.",
+                    span=span,
+                )
+
+    def _auto_inline_call(self, func_name: str, fn: Callable, call: ast.Call) -> ir.Expr:
+        """Inline an unannotated plain Python function at the call site.
+
+        The function body is expanded in-place (like @pl.inline). Nested bare-name
+        function calls are forbidden; raise UnsupportedFeatureError if found.
+
+        Args:
+            func_name: Name used at the call site
+            fn: The callable Python function (no DSL annotations)
+            call: AST Call node
+
+        Returns:
+            IR expression (inlined return value)
+        """
+        import textwrap as _tw  # noqa: PLC0415
+
+        from .decorator import InlineFunction, _get_source_info  # noqa: PLC0415
+
+        span = self.span_tracker.get_span(call)
+
+        try:
+            source_file, source_lines_raw, starting_line = _get_source_info(fn, "function")
+        except Exception as e:
+            raise UnsupportedFeatureError(
+                f"Cannot auto-inline '{func_name}': unable to retrieve source — {e}",
+                span=span,
+                hint=f"Define '{func_name}' in a .py file, or use @pl.inline",
+            ) from e
+
+        source_code = _tw.dedent("".join(source_lines_raw))
+        col_offset = len(source_lines_raw[0]) - len(source_lines_raw[0].lstrip()) if source_lines_raw else 0
+        line_offset = starting_line - 1
+        source_lines = source_code.split("\n")
+
+        try:
+            tree = ast.parse(source_code)
+        except SyntaxError as e:
+            raise UnsupportedFeatureError(
+                f"Cannot parse '{func_name}': {e}",
+                span=span,
+                hint=f"Use @pl.inline to explicitly mark '{func_name}' as an inline helper",
+            ) from e
+
+        func_def = next(
+            (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == fn.__name__),
+            None,
+        )
+        if func_def is None:
+            raise UnsupportedFeatureError(
+                f"Cannot find function definition for '{func_name}' in source",
+                span=span,
+                hint=f"Use @pl.inline to explicitly mark '{func_name}' as an inline helper",
+            )
+
+        # Constraint: no nested bare-name function calls
+        self._check_no_nested_calls(func_def, func_name, span)
+
+        fn_closure: dict[str, Any] = {**fn.__globals__}
+        if fn.__closure__ and fn.__code__.co_freevars:
+            fn_closure.update(
+                dict(zip(fn.__code__.co_freevars, (c.cell_contents for c in fn.__closure__)))
+            )
+
+        param_names = [a.arg for a in func_def.args.args if a.arg != "self"]
+        inline_func = InlineFunction(
+            name=fn.__name__,
+            func_def=func_def,
+            param_names=param_names,
+            source_file=source_file,
+            source_lines=source_lines,
+            line_offset=line_offset,
+            col_offset=col_offset,
+            closure_vars={**fn_closure, **self.expr_evaluator.closure_vars},
+        )
+        return self._parse_inline_call(func_name, inline_func, call)
+
+    def _implicit_func_call(self, func_name: str, fn: Callable, call: ast.Call) -> ir.Expr:
+        """Compile an annotated plain Python function as a KernelFunction and emit func.call.
+
+        Functions with complete DSL type annotations are compiled on first encounter and
+        cached by id(fn). Subsequent calls reuse the cached KernelFunction.
+
+        Functions without annotations raise UnsupportedFeatureError with a helpful hint.
+
+        Args:
+            func_name: Name used at the call site
+            fn: The callable Python function
+            call: AST Call node
+
+        Returns:
+            IR expression (func.call result)
+        """
+        import textwrap as _tw
+
+        from .decorator import KernelFunction, _get_source_info  # noqa: PLC0415
+        from .diagnostics import ParserError, ParserTypeError as _ParserTypeError  # noqa: PLC0415
+
+        span = self.span_tracker.get_span(call)
+
+        fn_id = id(fn)
+        if fn_id in self._implicit_func_cache:
+            return self._parse_func_call(func_name, self._implicit_func_cache[fn_id], call)
+
+        # Retrieve source
+        try:
+            source_file, source_lines_raw, starting_line = _get_source_info(fn, "function")
+        except Exception as e:
+            raise UnsupportedFeatureError(
+                f"Cannot compile '{func_name}': unable to retrieve source — {e}",
+                span=span,
+                hint=f"Define '{func_name}' in a .py file, or use @pl.func",
+            ) from e
+
+        source_code = _tw.dedent("".join(source_lines_raw))
+        col_offset = len(source_lines_raw[0]) - len(source_lines_raw[0].lstrip()) if source_lines_raw else 0
+        line_offset = starting_line - 1
+        source_lines = source_code.split("\n")
+
+        try:
+            tree = ast.parse(source_code)
+        except SyntaxError as e:
+            raise UnsupportedFeatureError(
+                f"Cannot parse '{func_name}': {e}",
+                span=span,
+                hint=f"Use @pl.func to explicitly mark '{func_name}' as a DSL helper",
+            ) from e
+
+        func_def = next(
+            (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == fn.__name__),
+            None,
+        )
+        if func_def is None:
+            raise UnsupportedFeatureError(
+                f"Cannot find function definition for '{func_name}' in source",
+                span=span,
+                hint=f"Use @pl.func to explicitly mark '{func_name}' as a DSL helper",
+            )
+
+        # Build closure for the function
+        fn_closure: dict[str, Any] = {**fn.__globals__}
+        if fn.__closure__ and fn.__code__.co_freevars:
+            fn_closure.update(
+                dict(zip(fn.__code__.co_freevars, (c.cell_contents for c in fn.__closure__)))
+            )
+
+        sub_parser = ASTParser(
+            source_file,
+            source_lines,
+            line_offset,
+            col_offset,
+            closure_vars={**fn_closure, **self.expr_evaluator.closure_vars},
+        )
+        # Share cache so nested implicit calls are deduplicated
+        sub_parser._implicit_func_cache = self._implicit_func_cache
+
+        try:
+            ir_func = sub_parser.parse_function(func_def, func_type=ir.FunctionType.Helper)
+        except _ParserTypeError as e:
+            raise UnsupportedFeatureError(
+                f"'{func_name}' called from kernel but has no DSL type annotations. "
+                f"Add annotations or use @pl.func.",
+                span=span,
+                hint=f"Example: def {func_name}(x: pl.Scalar[pl.INDEX]) -> pl.Scalar[pl.INDEX]: ...",
+            ) from e
+        except ParserError:
+            raise
+
+        gvar = ir.GlobalVar(fn.__name__)
+        param_names = [a.arg for a in func_def.args.args if a.arg != "self"]
+        kfunc = KernelFunction(
+            name=fn.__name__,
+            ir_function=ir_func,
+            gvar=gvar,
+            param_names=param_names,
+        )
+        self._implicit_func_cache[fn_id] = kfunc
+        # Merge nested implicit functions discovered by the sub-parser
+        self.external_funcs.update(sub_parser.external_funcs)
+        # Register this function so its definition is included in the program
+        self.external_funcs[fn.__name__] = ir_func
+        return self._parse_func_call(func_name, kfunc, call)
+
+    def _parse_func_call(self, func_name: str, kfunc: "KernelFunction", call: ast.Call) -> ir.Expr:
+        """Parse a call to a @pl.func function, emitting an ir.Call for func.call generation.
+
+        Args:
+            func_name: Name used at the call site
+            kfunc: KernelFunction holding the compiled ir.Function
+            call: AST Call node
+
+        Returns:
+            ir.Call expression with the function's GlobalVar and parsed arguments
+        """
+        from .decorator import KernelFunction  # noqa: PLC0415
+
+        span = self.span_tracker.get_span(call)
+        expected = len(kfunc.param_names)
+        got = len(call.args)
+        if got != expected:
+            raise ParserTypeError(
+                f"Function '{func_name}' expects {expected} argument(s), got {got}",
+                span=span,
+                hint=f"Parameters: {kfunc.param_names}",
+            )
+
+        arg_exprs = [self.parse_expression(arg) for arg in call.args]
+        return_types = list(kfunc.ir_function.return_types)
+        return self._make_call_with_return_type(kfunc.gvar, arg_exprs, return_types, span)
 
     def _parse_tile_type_call(self, call: ast.Call) -> Any:
         """Parse TileType(...) as a dataclass instantiation."""

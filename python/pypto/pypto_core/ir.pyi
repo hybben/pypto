@@ -642,6 +642,9 @@ class FunctionType(enum.Enum):
     InCore = ...
     """AICore sub-graph execution."""
 
+    Helper = ...
+    """Scalar helper function callable from kernels (generates func.call)."""
+
 class ParamDirection(enum.Enum):
     """Parameter direction classification.
 

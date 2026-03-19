@@ -581,6 +581,98 @@ def inline(func: Callable) -> InlineFunction:
     )
 
 
+@dataclasses.dataclass
+class KernelFunction:
+    """Stores a parsed ir.Function for true function call (func.call) semantics.
+
+    Functions decorated with @pl.func are compiled to a separate MLIR func.func
+    definition and called via func.call at use sites (no inlining).
+    """
+
+    name: str
+    ir_function: ir.Function
+    gvar: ir.GlobalVar
+    param_names: list[str]
+
+
+def func(fn: Callable) -> KernelFunction:
+    """Decorator for scalar helper functions callable from @fe.kernel.
+
+    Unlike @pl.inline (which expands the body in-place), @pl.func generates
+    a separate ``func.func`` definition in MLIR and emits a ``func.call``
+    instruction at each call site.
+
+    Suitable for scalar computations (index arithmetic, block-id calculations)
+    that are reused across multiple places or should remain as distinct functions
+    in the generated code.
+
+    Requirements:
+    - All parameters must have scalar type annotations (e.g. ``x: pl.INDEX``).
+    - The return type must be annotated (e.g. ``-> pl.INDEX``).
+    - Recursive calls are NOT supported (use @pl.inline for simple reuse).
+
+    Args:
+        fn: Python function to compile as a helper
+
+    Returns:
+        KernelFunction object with the parsed ir.Function
+
+    Example:
+        >>> @pl.func
+        ... def compute_offset(base: pl.INDEX, stride: pl.INDEX) -> pl.INDEX:
+        ...     return base + stride * pl.block.get_block_idx()
+        ...
+        >>> @fe.kernel
+        ... def my_kernel(a: pl.Tensor[[64, 128], pl.FP16]) -> pl.Tensor[[64, 128], pl.FP16]:
+        ...     offset = compute_offset(0, 64)   # → func.call @compute_offset(0, 64)
+        ...     ...
+    """
+    caller_frame = sys._getframe(1)
+    closure_vars = {**caller_frame.f_globals, **caller_frame.f_locals}
+
+    source_file, source_lines_raw, starting_line = _get_source_info(fn, "function")
+    source_code = textwrap.dedent("".join(source_lines_raw))
+    col_offset = _calculate_col_offset(source_lines_raw)
+    source_lines = source_code.split("\n")
+    line_offset = starting_line - 1
+
+    try:
+        tree = _parse_ast_tree(source_code, "function")
+        func_def = _find_ast_node(tree, ast.FunctionDef, fn.__name__, "function")
+
+        parser = ASTParser(
+            source_file,
+            source_lines,
+            line_offset,
+            col_offset,
+            closure_vars=closure_vars,
+        )
+
+        try:
+            ir_func = parser.parse_function(func_def, func_type=ir.FunctionType.Helper)
+        except ParserError:
+            raise
+        except Exception as e:
+            raise ParserSyntaxError(
+                f"Failed to parse helper function '{fn.__name__}': {e}",
+                hint="Check your function definition for errors",
+            ) from e
+
+    except ParserError as e:
+        _attach_source_lines_to_error(e, source_file, source_lines_raw)
+        raise
+
+    gvar = ir.GlobalVar(fn.__name__)
+    param_names = [a.arg for a in func_def.args.args if a.arg != "self"]
+
+    return KernelFunction(
+        name=fn.__name__,
+        ir_function=ir_func,
+        gvar=gvar,
+        param_names=param_names,
+    )
+
+
 def program(cls: type | None = None, *, strict_ssa: bool = False) -> ir.Program:
     """Decorator that parses a class with @pl.function methods into a Program.
 

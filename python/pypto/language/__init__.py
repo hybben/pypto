@@ -132,7 +132,7 @@ from .op.unified_ops import (
     sub,
     transpose,
 )
-from .parser.decorator import InlineFunction, function, inline, program
+from .parser.decorator import InlineFunction, KernelFunction, func, function, inline, program
 from .parser.text_parser import loads, loads_program, parse, parse_program
 from .typing import DynVar, InOut, IntLike, Out, Ptr, Scalar, Tensor, Tile, dynamic
 from .typing.tensor import TensorViewSpec as view
@@ -166,9 +166,11 @@ INDEX = DataType.INDEX
 
 __all__ = [
     "function",
+    "func",
     "inline",
     "program",
     "InlineFunction",
+    "KernelFunction",
     "parse",
     "parser",
     "loads",

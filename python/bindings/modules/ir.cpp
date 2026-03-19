@@ -769,6 +769,7 @@ void BindIR(nb::module_& m) {
       .value("Opaque", FunctionType::Opaque, "Unspecified function type (default)")
       .value("Orchestration", FunctionType::Orchestration, "Host/AICPU control and coordination")
       .value("InCore", FunctionType::InCore, "AICore sub-graph execution")
+      .value("Helper", FunctionType::Helper, "Scalar helper callable from kernels (generates func.call)")
       .export_values();
 
   // ParamDirection enum

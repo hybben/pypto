@@ -47,6 +47,7 @@ from pypto.language.parser.decorator import (
     _find_ast_node,
     _attach_source_lines_to_error,
     _extract_function_type_from_decorator,
+    KernelFunction,
 )
 from pypto.language.parser.diagnostics import ParserError, ParserSyntaxError
 
@@ -156,9 +157,21 @@ def kernel(
                     hint="Check your function definition for errors",
                 ) from e
 
-            # Wrap the function in a Program
+            # Collect @pl.func helper functions from closure and prepend to the Program.
+            # Helper functions must appear before the kernel in the module so that
+            # func.call references are well-formed.
+            helper_funcs = [
+                val.ir_function
+                for val in closure_vars.values()
+                if isinstance(val, KernelFunction)
+            ]
+
+            # Also include implicitly compiled functions discovered during parsing
+            implicit_funcs = list(parser.external_funcs.values())
+
+            # Wrap the function in a Program (helpers first, then kernel)
             program_span = ir.Span(source_file, starting_line, col_offset)
-            prog = ir.Program([ir_func], program_name, program_span)
+            prog = ir.Program(helper_funcs + implicit_funcs + [ir_func], program_name, program_span)
             return prog
 
         except ParserError as e:

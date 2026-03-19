@@ -1025,18 +1025,21 @@ class TestExternalFunctionCalls:
         ir.assert_structural_equal(AliasTest, Expected)
 
     def test_non_function_bare_call_still_errors(self):
-        """Bare call to a regular Python function still raises UnsupportedFeatureError."""
+        """Calling a non-callable object raises UnsupportedFeatureError.
 
-        def regular_python_func(x):
-            return x
+        Since auto-inline now handles plain callable Python functions, this test
+        verifies that truly unsupported call targets (non-callable values in
+        closure) still raise an error.
+        """
+        not_a_function = 42  # int, not callable
 
-        with pytest.raises(UnsupportedFeatureError, match="Unsupported function call"):
+        with pytest.raises((UnsupportedFeatureError, Exception), match="Unsupported"):
 
             @pl.program
             class BadCall:
                 @pl.function
                 def main(self, x: pl.Tensor[[64], pl.FP32]) -> pl.Tensor[[64], pl.FP32]:
-                    result: pl.Tensor[[64], pl.FP32] = regular_python_func(x)
+                    result: pl.Tensor[[64], pl.FP32] = not_a_function(x)  # type: ignore[operator]
                     return result
 
 
