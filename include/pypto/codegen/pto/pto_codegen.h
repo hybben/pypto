@@ -18,7 +18,6 @@
 #include <set>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -299,7 +298,8 @@ class PTOCodegen : public CodegenBase {
 
   /// Nesting depth for indirect-select mode. >0 means we're inside a scf.if
   /// that selects a value that cannot be returned directly (e.g., memref-like types).
-  /// YieldStmt yields an intermediate scalar (addr for TileType; ptr for TensorType in future).
+  /// YieldStmt yields an intermediate scalar: i64 addr for TileType; index offset for TensorType.
+  /// IfStmt reconstruction then rebuilds the actual object (alloc_tile / addptr+make_tensor_view).
   int indirect_select_depth_ = 0;
 
   // Current function context

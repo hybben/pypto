@@ -57,8 +57,10 @@ def dynamic_add_kernel(
             for j in pl.range(0, N_dim, 128):
                 # Barrier at start: ensure previous iteration's store is complete
                 pl.system.bar_all()
-                plm.load(tile_a, x, [i, j])
-                plm.load(tile_b, y, [i, j])
+                m_offset = pl.min(M_dim - i, 64)
+                n_offset = pl.min(N_dim - i, 128)
+                plm.load(tile_a, x, [i, j], [m_offset, n_offset])
+                plm.load(tile_b, y, [i, j], [m_offset, n_offset])
                 # Sync: wait for load (MTE2) to complete before compute (V)
                 pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
                 pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
@@ -66,7 +68,7 @@ def dynamic_add_kernel(
                 # Sync: wait for compute (V) to complete before store (MTE3)
                 pl.system.sync_src(set_pipe=pl.PipeType.V, wait_pipe=pl.PipeType.MTE3, event_id=1)
                 pl.system.sync_dst(set_pipe=pl.PipeType.V, wait_pipe=pl.PipeType.MTE3, event_id=1)
-                plm.store(z, tile_c, [i, j])
+                plm.store(z, tile_c, [i, j], [m_offset, n_offset])
     return z
 
 
@@ -79,13 +81,14 @@ def test_dynamic_add():
     compiled_lib = fe.compile(dynamic_add_kernel, arch="dav-c220-vec")
     print("compiled lib path:", compiled_lib.lib_path)
 
-    device = "npu:1"
+    device = "npu:7"
     torch.npu.set_device(device)
 
     shapes = [
         [64, 128],
         [128, 256],
         [96, 192],
+        [16, 16],
     ]
     torch.manual_seed(0)
     dtype = torch.float16

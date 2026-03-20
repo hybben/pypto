@@ -239,8 +239,6 @@ static std::string MakeManualLoadCodegenPTO(const CallPtr& op, codegen::CodegenB
 
   auto row_off = codegen.GetExprAsCode(offsets_tuple->elements_[0]);
   auto col_off = codegen.GetExprAsCode(offsets_tuple->elements_[1]);
-  int64_t height  = codegen.GetConstIntValue(tile_type->shape_[0]);
-  int64_t width   = codegen.GetConstIntValue(tile_type->shape_[1]);
 
   auto tensor_type = As<TensorType>(tensor->GetType());
   INTERNAL_CHECK(tensor_type) << "manual.load: tensor argument must have TensorType";
@@ -250,33 +248,46 @@ static std::string MakeManualLoadCodegenPTO(const CallPtr& op, codegen::CodegenB
   std::string tile_buf    = codegen.GetVarName(out_tile);
 
   std::string tensor_view_type = codegen.GetTensorViewTypeString(tensor_type.get());
-  std::string partition_type   = "!pto.partition_tensor_view<" + std::to_string(height) + "x" +
-                                 std::to_string(width) + "x" + dtype_str + ">";
-
-  // Emit partition_view.
-  std::string partition_view = codegen.NewTemp();
-  std::ostringstream pv_line;
-  pv_line << partition_view << " = pto.partition_view " << tensor_view
-          << ", offsets = [" << row_off << ", " << col_off << "]"
-          << ", sizes = ["   << codegen.GetIndexConstant(height)  << ", "
-          << codegen.GetIndexConstant(width) << "]"
-          << " : " << tensor_view_type << " -> " << partition_type;
-  codegen.Emit(pv_line.str());
 
   // Derive tile_buf type from the out_tile's TileType memref (may be empty before alloc pass).
   std::string tile_buf_type = codegen.GetTileBufTypeStringFromTileType(tile_type);
 
-  // Emit set_validshape only for dynamic tiles.
-  // Static tiles don't need valid shape; ptoas also doesn't support pto.set_validshape for them.
+  std::string partition_view = codegen.NewTemp();
+  std::string partition_type;
+  std::ostringstream pv_line;
   if (!shapes_tuple->elements_.empty()) {
     bool is_dynamic = tile_buf_type.find("v_row=?, v_col=?") != std::string::npos;
     INTERNAL_CHECK(is_dynamic) << "manual.load: only dynamic tile can set valid shape";
+    auto cur_row = codegen.GetExprAsCode(shapes_tuple->elements_[0]);
+    auto cur_col = codegen.GetExprAsCode(shapes_tuple->elements_[1]);
+
+    // Emit partition_view.
+    partition_type = "!pto.partition_tensor_view<?x?x" + dtype_str + ">";
+    pv_line << partition_view << " = pto.partition_view " << tensor_view
+            << ", offsets = [" << row_off << ", " << col_off << "]"
+            << ", sizes = ["   << cur_row  << ", " << cur_col << "]"
+            << " : " << tensor_view_type << " -> " << partition_type;
+    codegen.Emit(pv_line.str());
+
+    // Emit set_validshape only for dynamic tiles.
+    // Static tiles don't need valid shape; ptoas also doesn't support pto.set_validshape for them.
     std::ostringstream set_line;
-    auto valid_row = codegen.GetExprAsCode(shapes_tuple->elements_[0]);
-    auto valid_col = codegen.GetExprAsCode(shapes_tuple->elements_[1]);
     set_line << "pto.set_validshape " << tile_buf << ", "
-              << valid_row << ", " << valid_col << " : " << tile_buf_type;
+              << cur_row << ", " << cur_col << " : " << tile_buf_type;
     codegen.Emit(set_line.str());
+  } else {
+    auto cur_row = codegen.GetConstIntValue(tile_type->shape_[0]);
+    auto cur_col = codegen.GetConstIntValue(tile_type->shape_[1]);
+
+    // Emit partition_view.
+    partition_type = "!pto.partition_tensor_view<" + std::to_string(cur_row) + "x" +
+                                 std::to_string(cur_col) + "x" + dtype_str + ">";
+    pv_line << partition_view << " = pto.partition_view " << tensor_view
+          << ", offsets = [" << row_off << ", " << col_off << "]"
+          << ", sizes = ["   << codegen.GetIndexConstant(cur_row)  << ", "
+          << codegen.GetIndexConstant(cur_col) << "]"
+          << " : " << tensor_view_type << " -> " << partition_type;
+    codegen.Emit(pv_line.str());
   }
 
   // Emit tload using the explicit out_tile as outs target.
@@ -320,40 +331,51 @@ static std::string MakeManualStoreCodegenPTO(const CallPtr& op, codegen::Codegen
 
   auto row_off = codegen.GetExprAsCode(offsets_tuple->elements_[0]);
   auto col_off = codegen.GetExprAsCode(offsets_tuple->elements_[1]);
-  int64_t height = codegen.GetConstIntValue(tile_type->shape_[0]);
-  int64_t width  = codegen.GetConstIntValue(tile_type->shape_[1]);
 
   std::string dtype_str = codegen.GetTypeString(tensor_type->dtype_);
   std::string tensor_view = codegen.GetOrCreateTensorView(output_tensor);
   std::string tile_buf = codegen.GetVarName(tile);
 
   std::string tensor_view_type = codegen.GetTensorViewTypeString(tensor_type.get());
-  std::string partition_type   = "!pto.partition_tensor_view<" + std::to_string(height) + "x" +
-                                 std::to_string(width) + "x" + dtype_str + ">";
 
   std::string tile_buf_type = codegen.GetTileBufTypeStringFromTileType(tile_type);
 
   std::string partition_view = codegen.NewTemp();
+  std::string partition_type;
   std::ostringstream pv_line;
-  pv_line << partition_view << " = pto.partition_view " << tensor_view
-          << ", offsets = [" << row_off << ", " << col_off << "]"
-          << ", sizes = [" << codegen.GetIndexConstant(height) << ", "
-          << codegen.GetIndexConstant(width) << "]"
-          << " : " << tensor_view_type << " -> " << partition_type;
-  codegen.Emit(pv_line.str());
-
-  // Emit set_validshape only for dynamic tiles.
-  // Static tiles don't need valid shape; ptoas also doesn't support pto.set_validshape for them.
   if (!shapes_tuple->elements_.empty()) {
     bool is_dynamic = tile_buf_type.find("v_row=?, v_col=?") != std::string::npos;
-    if (is_dynamic) {
-      std::ostringstream set_line;
-      auto valid_row = codegen.GetExprAsCode(shapes_tuple->elements_[0]);
-      auto valid_col = codegen.GetExprAsCode(shapes_tuple->elements_[1]);
-      set_line << "pto.set_validshape " << tile_buf << ", "
-               << valid_row << ", " << valid_col << " : " << tile_buf_type;
-      codegen.Emit(set_line.str());
-    }
+    INTERNAL_CHECK(is_dynamic) << "manual.load: only dynamic tile can set valid shape";
+    auto cur_row = codegen.GetExprAsCode(shapes_tuple->elements_[0]);
+    auto cur_col = codegen.GetExprAsCode(shapes_tuple->elements_[1]);
+
+    // Emit partition_view.
+    partition_type = "!pto.partition_tensor_view<?x?x" + dtype_str + ">";
+    pv_line << partition_view << " = pto.partition_view " << tensor_view
+            << ", offsets = [" << row_off << ", " << col_off << "]"
+            << ", sizes = ["   << cur_row  << ", " << cur_col << "]"
+            << " : " << tensor_view_type << " -> " << partition_type;
+    codegen.Emit(pv_line.str());
+
+    // Emit set_validshape only for dynamic tiles.
+    // Static tiles don't need valid shape; ptoas also doesn't support pto.set_validshape for them.
+    std::ostringstream set_line;
+    set_line << "pto.set_validshape " << tile_buf << ", "
+              << cur_row << ", " << cur_col << " : " << tile_buf_type;
+    codegen.Emit(set_line.str());
+  } else {
+    auto cur_row = codegen.GetConstIntValue(tile_type->shape_[0]);
+    auto cur_col = codegen.GetConstIntValue(tile_type->shape_[1]);
+
+    // Emit partition_view.
+    partition_type = "!pto.partition_tensor_view<" + std::to_string(cur_row) + "x" +
+                                 std::to_string(cur_col) + "x" + dtype_str + ">";
+    pv_line << partition_view << " = pto.partition_view " << tensor_view
+          << ", offsets = [" << row_off << ", " << col_off << "]"
+          << ", sizes = ["   << codegen.GetIndexConstant(cur_row)  << ", "
+          << codegen.GetIndexConstant(cur_col) << "]"
+          << " : " << tensor_view_type << " -> " << partition_type;
+    codegen.Emit(pv_line.str());
   }
 
   std::ostringstream tstore_line;

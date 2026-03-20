@@ -10,6 +10,7 @@
  */
 
 #include "pypto/codegen/pto/pto_codegen.h"
+#include "pypto/ir/transforms/printer.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -164,7 +165,6 @@ PTOCodegen::PTOCodegen(const backend::Backend* backend) : backend_(backend) {
 // ========================================================================
 // Generate entry and GenerateFunction
 // ========================================================================
-
 std::string PTOCodegen::Generate(const ProgramPtr& program) {
   // Lower break/continue to structured control flow before emitting MLIR.
   // This pass is idempotent: programs without break/continue are unchanged.
@@ -586,6 +586,12 @@ void PTOCodegen::VisitStmt_(const AssignStmtPtr& op) {
   // mapping arith var name to mlir mapping
   if (!current_expr_value_.empty()) {
     var_to_mlir_[op->var_->name_] = current_expr_value_;
+    // If the rhs is a tensor view (i.e. the assigned variable has TensorType),
+    // propagate tensor_to_view_ and tensor_view_to_ptr_ so that later
+    // GetOrCreateTensorView() calls on this lhs variable succeed.
+    if (As<TensorType>(op->var_->GetType())) {
+      tensor_to_view_[op->var_->name_] = current_expr_value_;
+    }
     current_expr_value_ = "";
   }
 }
@@ -1109,7 +1115,20 @@ void PTOCodegen::VisitStmt_(const YieldStmtPtr& op) {
         }
         if (addr_operand.empty()) addr_operand = GetOrEmitI64Constant(0);
         val = addr_operand;
-        // Future: TensorType → yield ptr via similar pattern
+      } else if (auto tensor_type = As<TensorType>(expr->GetType())) {
+        // TensorType: yield index offset instead of ptr for indirect-select scf.if.
+        // The scf.if yields an index (addptr offset), then IfStmt reconstruction emits
+        // pto.addptr(base, selected_offset) + pto.make_tensor_view to rebuild the view.
+        INTERNAL_CHECK(tensor_type->tensor_view_.has_value() &&
+                       tensor_type->tensor_view_->ptr.has_value())
+            << "TensorType yield: no ptr in TensorView. Ensure the workspace tensor "
+            << "variable has no type annotation (write `ws = pl.make_tensor(...)`, "
+            << "not `ws: pl.Tensor[...] = pl.make_tensor(...)`)";
+        auto& ptr_expr = *tensor_type->tensor_view_->ptr;
+        auto ptr_ty = As<PtrType>(ptr_expr->GetType());
+        INTERNAL_CHECK(ptr_ty && ptr_ty->offset.has_value())
+            << "TensorType yield: ptr has no offset. Use pl.addptr(workspace, offset).";
+        val = GetExprAsCode(*ptr_ty->offset);
       }
     }
     yielded_values.push_back(val);
@@ -1194,8 +1213,11 @@ void PTOCodegen::VisitStmt_(const IfStmtPtr& op) {
         }
       } else if (As<TileType>(return_var->GetType())) {
         // TileType: scf.if yields i64 addr; pto.alloc_tile reconstructs tile_buf after scf.if.
-        // NOTE: Add TensorType here in future (yields ptr, reconstructs via make_tensor_view).
         type_str = "i64";
+        indirect_yield = true;
+      } else if (auto tensor_type = As<TensorType>(return_var->GetType())) {
+        // TensorType: scf.if yields index offset; pto.addptr + pto.make_tensor_view reconstruct after.
+        type_str = "index";
         indirect_yield = true;
       }
       return_var_types.push_back(type_str);
@@ -1296,7 +1318,51 @@ void PTOCodegen::VisitStmt_(const IfStmtPtr& op) {
         Emit(tile_name + " = pto.alloc_tile addr = " + addr_ssa + " : " + tile_buf_type);
         var_to_mlir_[return_var->name_] = tile_name;
         extra_tile_buf_types_[tile_name] = tile_buf_type;
-        // Future: } else if (auto tensor_type = As<TensorType>(return_var->GetType())) { ... }
+      } else if (auto tensor_type = As<TensorType>(return_var->GetType())) {
+        // TensorType: reconstruct tensor_view from (base ptr, selected index offset) returned by scf.if.
+        // 1. Read base_ptr from the PtrType annotation stored in the tensor's TensorView::ptr.
+        INTERNAL_CHECK(tensor_type->tensor_view_.has_value() && tensor_type->tensor_view_->ptr.has_value())
+            << "TensorType indirect-select: no ptr in TensorView for " << return_var->name_
+            << ". Ensure the workspace tensor has no type annotation (use `ws = pl.make_tensor(...)`)";
+        auto& ptr_expr_ref = *tensor_type->tensor_view_->ptr;
+        auto ptr_ty = As<PtrType>(ptr_expr_ref->GetType());
+        INTERNAL_CHECK(ptr_ty && ptr_ty->base_ptr.has_value())
+            << "TensorType indirect-select: no base_ptr in PtrType for " << return_var->name_
+            << ". Use pl.addptr(workspace, offset).";
+        std::string base_ssa = GetExprAsCode(*ptr_ty->base_ptr);
+        // 2. Emit: cur_ptr = pto.addptr base, selected_offset : type -> type
+        std::string dtype_str = GetTypeString(tensor_type->dtype_);
+        std::string ptr_type = "!pto.ptr<" + dtype_str + ">";
+        std::string cur_ptr = NewTemp();
+        Emit(cur_ptr + " = pto.addptr " + base_ssa + ", " + return_var_names[rv_idx] +
+             " : " + ptr_type + " -> " + ptr_type);
+        // 3. Emit: view = pto.make_tensor_view cur_ptr, shape, strides
+        std::string view_name = NewTemp();
+        std::ostringstream oss;
+        oss << view_name << " = pto.make_tensor_view " << cur_ptr << ", shape = [";
+        for (size_t j = 0; j < tensor_type->shape_.size(); j++) {
+          if (j > 0) oss << ", ";
+          oss << GetExprAsCode(tensor_type->shape_[j]);
+        }
+        oss << "], strides = [";
+        const bool has_stride = tensor_type->tensor_view_.has_value() &&
+                                !tensor_type->tensor_view_->stride.empty();
+        if (has_stride) {
+          const auto& stride = tensor_type->tensor_view_->stride;
+          for (size_t j = 0; j < stride.size(); j++) {
+            if (j > 0) oss << ", ";
+            oss << GetExprAsCode(stride[j]);
+          }
+        } else {
+          if (tensor_type->shape_.size() == 2) {
+            oss << GetExprAsCode(tensor_type->shape_[1]) << ", " << GetOrEmitIndexConstant(1);
+          } else if (tensor_type->shape_.size() == 1) {
+            oss << GetOrEmitIndexConstant(1);
+          }
+        }
+        oss << "] : " << GetTensorViewTypeString(tensor_type.get());
+        Emit(oss.str());
+        SetTensorViewName(return_var->name_, view_name);
       } else {
         INTERNAL_CHECK(false) << "Internal error: unsupported type for indirect-select return var: "
                               << return_var->name_;

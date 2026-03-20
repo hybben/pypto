@@ -271,7 +271,8 @@ class SSAConverter : public IRMutator {
 
       // Create phi output variable with new version
       int phi_version = NextVersion(base_name);
-      auto phi_var = std::make_shared<Var>(base_name + "_" + std::to_string(phi_version), then_var->GetType(),
+      auto phi_type = SubstituteVarsInType(then_var->GetType());
+      auto phi_var = std::make_shared<Var>(base_name + "_" + std::to_string(phi_version), phi_type,
                                            op->span_);
 
       return_vars.push_back(phi_var);
@@ -295,8 +296,9 @@ class SSAConverter : public IRMutator {
       }
       if (!already_handled) {
         int rv_version = NextVersion(base_name);
+        auto rv_type = SubstituteVarsInType(existing_rv->GetType());
         auto versioned_rv = std::make_shared<Var>(base_name + "_" + std::to_string(rv_version),
-                                                  existing_rv->GetType(), existing_rv->span_);
+                                                  rv_type, existing_rv->span_);
         return_vars.push_back(versioned_rv);
         current_version_[base_name] = versioned_rv;
       }
@@ -330,8 +332,9 @@ class SSAConverter : public IRMutator {
     std::vector<IterArgPtr> new_iter_args;
     for (const auto& iter_arg : op->iter_args_) {
       auto new_init = VisitExpr(iter_arg->initValue_);
+      auto ia_type = SubstituteVarsInType(iter_arg->GetType());
       auto new_ia =
-          std::make_shared<IterArg>(iter_arg->name_, iter_arg->GetType(), new_init, iter_arg->span_);
+          std::make_shared<IterArg>(iter_arg->name_, ia_type, new_init, iter_arg->span_);
       new_iter_args.push_back(new_ia);
     }
 
@@ -375,8 +378,9 @@ class SSAConverter : public IRMutator {
 
       // Create return var for post-loop access
       int rv_version = NextVersion(base_name);
+      auto rv_type = SubstituteVarsInType(init_var->GetType());
       auto return_var =
-          std::make_shared<Var>(base_name + "_" + std::to_string(rv_version), init_var->GetType(), op->span_);
+          std::make_shared<Var>(base_name + "_" + std::to_string(rv_version), rv_type, op->span_);
       return_vars.push_back(return_var);
     }
 
@@ -385,8 +389,9 @@ class SSAConverter : public IRMutator {
 
     // Create versioned loop variable
     int loop_var_version = NextVersion(loop_var_base);
+    auto loop_var_type = SubstituteVarsInType(op->loop_var_->GetType());
     auto new_loop_var = std::make_shared<Var>(loop_var_base + "_" + std::to_string(loop_var_version),
-                                              op->loop_var_->GetType(), op->loop_var_->span_);
+                                              loop_var_type, op->loop_var_->span_);
     current_version_[loop_var_base] = new_loop_var;
 
     // Register ALL iter_args (existing + new loop-carried) in loop scope
@@ -452,8 +457,9 @@ class SSAConverter : public IRMutator {
     std::vector<IterArgPtr> new_iter_args;
     for (const auto& iter_arg : op->iter_args_) {
       auto new_init = VisitExpr(iter_arg->initValue_);
+      auto ia_type = SubstituteVarsInType(iter_arg->GetType());
       auto new_ia =
-          std::make_shared<IterArg>(iter_arg->name_, iter_arg->GetType(), new_init, iter_arg->span_);
+          std::make_shared<IterArg>(iter_arg->name_, ia_type, new_init, iter_arg->span_);
       new_iter_args.push_back(new_ia);
     }
 
@@ -494,8 +500,9 @@ class SSAConverter : public IRMutator {
 
       // Create return var for post-loop access
       int rv_version = NextVersion(base_name);
+      auto rv_type = SubstituteVarsInType(init_var->GetType());
       auto return_var =
-          std::make_shared<Var>(base_name + "_" + std::to_string(rv_version), init_var->GetType(), op->span_);
+          std::make_shared<Var>(base_name + "_" + std::to_string(rv_version), rv_type, op->span_);
       new_loop_carried_return_vars.push_back(return_var);
     }
 
@@ -593,25 +600,56 @@ class SSAConverter : public IRMutator {
    * the IR consistent.
    */
   TypePtr SubstituteVarsInType(const TypePtr& type) {
-    auto tile_type = As<TileType>(type);
-    if (!tile_type || !tile_type->tile_view_.has_value()) return type;
-
-    const auto& tv = tile_type->tile_view_.value();
-    if (tv.valid_shape.empty()) return type;
-
-    std::vector<ExprPtr> new_valid_shape;
-    bool changed = false;
-    for (const auto& vs : tv.valid_shape) {
-      auto new_vs = VisitExpr(vs);
-      if (new_vs != vs) changed = true;
-      new_valid_shape.push_back(new_vs);
+    // Handle TileType: substitute Vars in tile_view.valid_shape
+    if (auto tile_type = As<TileType>(type)) {
+      if (!tile_type->tile_view_.has_value()) return type;
+      const auto& tv = tile_type->tile_view_.value();
+      if (tv.valid_shape.empty()) return type;
+      std::vector<ExprPtr> new_valid_shape;
+      bool changed = false;
+      for (const auto& vs : tv.valid_shape) {
+        auto new_vs = VisitExpr(vs);
+        if (new_vs != vs) changed = true;
+        new_valid_shape.push_back(new_vs);
+      }
+      if (!changed) return type;
+      TileView new_tile_view = tv;
+      new_tile_view.valid_shape = std::move(new_valid_shape);
+      return std::make_shared<TileType>(tile_type->shape_, tile_type->dtype_, tile_type->memref_,
+                                        std::make_optional(std::move(new_tile_view)));
     }
-    if (!changed) return type;
 
-    TileView new_tile_view = tv;
-    new_tile_view.valid_shape = std::move(new_valid_shape);
-    return std::make_shared<TileType>(tile_type->shape_, tile_type->dtype_, tile_type->memref_,
-                                      std::make_optional(std::move(new_tile_view)));
+    // Handle PtrType: substitute Vars in base_ptr and offset (codegen-level fields)
+    if (auto ptr_type = As<PtrType>(type)) {
+      if (!ptr_type->base_ptr.has_value()) return type;
+      auto new_base = VisitExpr(*ptr_type->base_ptr);
+      ExprPtr new_offset{};
+      if (ptr_type->offset.has_value()) new_offset = VisitExpr(*ptr_type->offset);
+      bool changed = (new_base != *ptr_type->base_ptr) ||
+                     (ptr_type->offset.has_value() && new_offset != *ptr_type->offset);
+      if (!changed) return type;
+      auto result = std::make_shared<PtrType>(ptr_type->dtype_);
+      result->base_ptr = new_base;
+      result->offset = ptr_type->offset.has_value() ? std::make_optional(new_offset) : std::nullopt;
+      return result;
+    }
+
+    // Handle TensorType: substitute Vars in tensor_view_.ptr (and its PtrType fields)
+    if (auto tensor_type = As<TensorType>(type)) {
+      if (!tensor_type->tensor_view_.has_value()) return type;
+      const auto& tv = tensor_type->tensor_view_.value();
+      if (!tv.ptr.has_value()) return type;
+      auto new_ptr_expr = VisitExpr(*tv.ptr);
+      bool ptr_changed = (new_ptr_expr != *tv.ptr);
+      if (!ptr_changed) return type;
+      TensorView new_tv = tv;
+      new_tv.ptr = new_ptr_expr;
+      return std::make_shared<TensorType>(tensor_type->shape_, tensor_type->dtype_,
+                                          tensor_type->memref_,
+                                          std::make_optional(std::move(new_tv)));
+    }
+
+    return type;
   }
 
   /**

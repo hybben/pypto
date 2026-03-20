@@ -145,6 +145,7 @@ enum class TensorLayout {
 struct TensorView {
   std::vector<ExprPtr> stride;  ///< Stride for each dimension
   TensorLayout layout;          ///< Tensor layout type
+  std::optional<ExprPtr> ptr;   ///< Source pointer (set for ptr.make_tensor-created views)
 
   /**
    * @brief Default constructor for aggregate initialization
@@ -152,7 +153,7 @@ struct TensorView {
   TensorView() : layout(TensorLayout::ND) {}
 
   /**
-   * @brief Constructor with all parameters
+   * @brief Constructor with stride and layout
    *
    * @param stride Stride for each dimension
    * @param layout Tensor layout type
@@ -160,7 +161,19 @@ struct TensorView {
   TensorView(std::vector<ExprPtr> stride, TensorLayout layout) : stride(std::move(stride)), layout(layout) {}
 
   /**
+   * @brief Constructor with stride, layout, and source pointer
+   *
+   * @param stride Stride for each dimension
+   * @param layout Tensor layout type
+   * @param ptr_expr Source pointer expression (for indirect-select yield)
+   */
+  TensorView(std::vector<ExprPtr> stride, TensorLayout layout, ExprPtr ptr_expr)
+      : stride(std::move(stride)), layout(layout), ptr(std::move(ptr_expr)) {}
+
+  /**
    * @brief Get field descriptors for reflection-based visitation
+   *
+   * Note: ptr is excluded from reflection (codegen-level info, not structural).
    *
    * @return Tuple of field descriptors
    */
@@ -558,10 +571,18 @@ inline MemRefTypePtr GetMemRefType() {
  * Represents a raw pointer to global memory of a specific element type.
  * Corresponds to `!pto.ptr<dtype>` in PTO MLIR.
  * Used as the base-pointer argument for `pl.make_tensor` body ops.
+ *
+ * `base_ptr` and `offset` are codegen-level annotations (excluded from
+ * structural equality) that track the decomposition of chained addptr calls.
  */
 class PtrType : public Type {
  public:
   DataType dtype_;  ///< Element type pointed to
+
+  /// Original ptr function param expr (codegen-level, excluded from reflection)
+  std::optional<ExprPtr> base_ptr;
+  /// Accumulated element offset expr (codegen-level, excluded from reflection)
+  std::optional<ExprPtr> offset;
 
   /**
    * @brief Create a pointer type
@@ -570,9 +591,20 @@ class PtrType : public Type {
    */
   explicit PtrType(DataType dtype) : dtype_(dtype) {}
 
+  /**
+   * @brief Create a pointer type with addptr decomposition
+   *
+   * @param dtype Element data type
+   * @param base Original pointer parameter expression
+   * @param off  Accumulated element offset expression
+   */
+  PtrType(DataType dtype, ExprPtr base, ExprPtr off)
+      : dtype_(dtype), base_ptr(std::move(base)), offset(std::move(off)) {}
+
   [[nodiscard]] ObjectKind GetKind() const override { return ObjectKind::PtrType; }
   [[nodiscard]] std::string TypeName() const override { return "PtrType"; }
 
+  // Only dtype_ participates in structural equality; base_ptr/offset are codegen annotations.
   static constexpr auto GetFieldDescriptors() {
     return std::tuple_cat(Type::GetFieldDescriptors(),
                           std::make_tuple(reflection::UsualField(&PtrType::dtype_, "dtype")));

@@ -29,6 +29,7 @@
 #include "pypto/ir/expr.h"
 #include "pypto/ir/kind_traits.h"
 #include "pypto/ir/op_registry.h"
+#include "pypto/ir/scalar_expr.h"
 #include "pypto/ir/type.h"
 
 namespace pypto {
@@ -56,8 +57,33 @@ TypePtr DeduceAddPtrType(const std::vector<ExprPtr>& args,
       << "ptr.addptr offset must have integer or index dtype, but got "
       << offset_type->dtype_.ToString();
 
-  // Return the same PtrType (pointer is advanced but still points to same element type)
-  return ptr_type;
+  // Return the same PtrType (pointer is advanced but still points to same element type),
+  // with base_ptr/offset annotations for codegen indirect-select support.
+  ExprPtr new_base_ptr;
+  ExprPtr new_offset;
+
+  if (ptr_type->base_ptr.has_value()) {
+    // Chained addptr: propagate base from the input ptr, fold offsets if possible.
+    new_base_ptr = *ptr_type->base_ptr;
+    if (auto c1 = As<ConstInt>(*ptr_type->offset)) {
+      if (auto c2 = As<ConstInt>(args[1])) {
+        new_offset = std::make_shared<ConstInt>(c1->value_ + c2->value_,
+                                                DataType(DataType::INDEX), args[1]->span_);
+      } else {
+        new_offset = std::make_shared<Add>(*ptr_type->offset, args[1],
+                                           DataType(DataType::INDEX), args[1]->span_);
+      }
+    } else {
+      new_offset = std::make_shared<Add>(*ptr_type->offset, args[1],
+                                         DataType(DataType::INDEX), args[1]->span_);
+    }
+  } else {
+    // Direct addptr on a function parameter — record base and offset directly.
+    new_base_ptr = args[0];
+    new_offset   = args[1];
+  }
+
+  return std::make_shared<PtrType>(ptr_type->dtype_, new_base_ptr, new_offset);
 }
 
 REGISTER_OP("ptr.addptr")
@@ -95,7 +121,7 @@ TypePtr DeduceMakeTensorType(const std::vector<ExprPtr>& args,
       << "ptr.make_tensor shape rank (" << shape_tuple->elements_.size()
       << ") must match stride rank (" << stride_tuple->elements_.size() << ")";
 
-  TensorView tv(stride_tuple->elements_, TensorLayout::ND);
+  TensorView tv(stride_tuple->elements_, TensorLayout::ND, args[0]);
   return std::make_shared<TensorType>(shape_tuple->elements_, ptr_type->dtype_, std::nullopt, tv);
 }
 

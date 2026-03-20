@@ -765,8 +765,9 @@ static std::string MakePtrAddPtrCodegenPTO(const CallPtr& op, codegen::CodegenBa
   auto result_type = As<PtrType>(op->GetType());
   INTERNAL_CHECK(result_type) << "ptr.addptr result must be PtrType";
   codegen.SetVarMlirName(codegen.GetCurrentResultVarName(), result_name);
-  codegen.Emit(result_name + " = pto.addptr " + ptr_name + ", " + offset_name + " : !pto.ptr<" +
-               codegen.GetTypeString(result_type->dtype_) + ">");
+  std::string ptr_type_str = "!pto.ptr<" + codegen.GetTypeString(result_type->dtype_) + ">";
+  codegen.Emit(result_name + " = pto.addptr " + ptr_name + ", " + offset_name + " : " +
+               ptr_type_str + " -> " + ptr_type_str);
   return "";
 }
 

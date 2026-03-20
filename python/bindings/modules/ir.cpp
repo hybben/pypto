@@ -247,7 +247,9 @@ void BindIR(nb::module_& m) {
       .def(nb::init<const std::vector<ExprPtr>&, TensorLayout>(), nb::arg("stride"), nb::arg("layout"),
            "Create a tensor view with stride and layout")
       .def_rw("stride", &TensorView::stride, "Stride for each dimension")
-      .def_rw("layout", &TensorView::layout, "Tensor layout type");
+      .def_rw("layout", &TensorView::layout, "Tensor layout type")
+      .def_rw("ptr", &TensorView::ptr,
+              "Source pointer ExprPtr (set for ptr.make_tensor-created views; None otherwise).");
 
   // TensorType - const shared_ptr
   auto tensor_type_class = nb::class_<TensorType, ShapedType>(ir, "TensorType", "Tensor type representation");

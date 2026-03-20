@@ -375,6 +375,9 @@ class TensorView:
     layout: TensorLayout
     """Tensor layout type."""
 
+    ptr: Expr | None
+    """Source pointer ExprPtr (set for ptr.make_tensor-created views; None otherwise)."""
+
     @overload
     def __init__(self) -> None:
         """Create an empty tensor view with default ND layout."""
