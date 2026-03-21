@@ -93,7 +93,7 @@ def dynamic_softmax_kernel(
 
 @fe.jit()
 def test_dynamic_softmax():
-    compiled_lib = fe.compile(dynamic_softmax_kernel, arch="dav-c220-vec")
+    compiled_lib = fe.compile(dynamic_softmax_kernel, arch="a3")
     print("compiled lib path:", compiled_lib.lib_path)
 
     device = "npu:1"

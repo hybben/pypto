@@ -70,7 +70,7 @@ def test_add():
     y = torch.rand(shape, device=device, dtype=dtype)
     z = torch.empty(shape, device=device, dtype=dtype)
 
-    compiled_lib = fe.compile(add_kernel_128, arch="dav-c220-vec")
+    compiled_lib = fe.compile(add_kernel_128, arch="a3")
     print("compiled lib path:", compiled_lib.lib_path)
     fe.launch(None, 2, compiled_lib, x, y, z)
 

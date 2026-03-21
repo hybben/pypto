@@ -462,16 +462,35 @@ def _inject_set_ffts_to_mlir(mlir_code: str) -> str:
     return final_code
 
 def _normalize_arch(arch: str | None) -> str:
-    """Normalize and validate arch names."""
-    value = (arch or os.environ.get("PYPTO_JIT_ARCH") or "dav-c220").strip().lower()
-    if value not in {"dav-c220-vec", "dav-c220-cube", "dav-c220"}:
-        raise ValueError(f"Unsupported arch: {arch}")
+    """Normalize and validate arch names to 'a2', 'a3', or 'a5'."""
+    value = (arch or os.environ.get("PYPTO_JIT_ARCH") or "a3").strip().lower()
+    if value not in {"a2", "a3", "a5"}:
+        raise ValueError(
+            f"Unsupported arch: {arch!r}, expected one of 'a2', 'a3', 'a5'"
+        )
     return value
 
 
-def _build_bisheng_flags(toolkit_home: str, arch: str) -> list[str]:
-    """Build bisheng flags for single-command shared-library compilation."""
+def _build_bisheng_flags(toolkit_home: str, arch: str, cpp_content: str) -> list[str]:
+    """Build bisheng flags for single-command shared-library compilation.
+
+    Determines the npu_arch from the arch ('a2'/'a3'/'a5') and the presence
+    of __DAV_CUBE__ / __DAV_VEC__ macros in the generated C++ source.
+    """
     arch = _normalize_arch(arch)
+
+    has_cube = "__DAV_CUBE__" in cpp_content
+    has_vec = "__DAV_VEC__" in cpp_content
+
+    if has_cube and has_vec:
+        npu_arch = "dav-c220" if arch in ("a2", "a3") else "dav-c310"
+    elif has_cube:
+        npu_arch = "dav-c220-cube" if arch in ("a2", "a3") else "dav-c310-cube"
+    elif has_vec:
+        npu_arch = "dav-c220-vec" if arch in ("a2", "a3") else "dav-c310-vec"
+    else:
+        npu_arch = "dav-c220" if arch in ("a2", "a3") else "dav-c310"
+
     common = [
         "-fPIC",
         "-shared",
@@ -481,27 +500,22 @@ def _build_bisheng_flags(toolkit_home: str, arch: str) -> list[str]:
         "-std=c++17",
         f"-I{toolkit_home}/include",
     ]
-    if arch == "dav-c220":
-        return ["--cce-aicore-arch=dav-c220", "--cce-fatobj-link", *common]
-    if arch == "dav-c220-vec":
-        return ["--cce-aicore-arch=dav-c220-vec", *common]
-    if arch == "dav-c220-cube":
-        return ["--cce-aicore-arch=dav-c220-cube", *common]
-    raise ValueError(f"Unsupported arch for _build_bisheng_flags: {arch}")
+    flags = [f"--cce-aicore-arch={npu_arch}"]
+    if has_cube and has_vec:
+        flags.append("--cce-fatobj-link")
+    return [*flags, *common]
 
 
-def compile(prog, clean_up=False, timeout=20, arch: str = "dav-c220", has_cross_sync = False):
+def compile(prog, clean_up=False, timeout=20, arch: str = "a3"):
     """Compile a PTO program to a shared library.
 
     Args:
         prog: The PTO program to compile.
         clean_up: Whether to remove intermediate files after compilation.
         timeout: Compilation timeout in seconds.
-        arch: Target architecture. Options:
-            - "dav-c220-vec": Vector operations only (add, mul, etc.)
-            - "dav-c220-cube": Cube operations only (matmul, etc.)
-            - "dav-c220": Mixed vector and cube operations (default)
+        arch: Target architecture. Options: "a2", "a3", "a5".
     """
+    arch = _normalize_arch(arch)
     backend.reset_for_testing()
     backend.set_backend_type(BackendType.PTO)
     Path("./build").mkdir(parents=True, exist_ok=True)
@@ -510,17 +524,18 @@ def compile(prog, clean_up=False, timeout=20, arch: str = "dav-c220", has_cross_
     final_kernel = "./build/call_kernel.cpp"
     lib_path = "./build/call_kernel.so"
 
-    if "dav-c220" in arch :
-        pto_arch = "a3"
+    if arch in ("a2", "a3"):
         os.environ["npu_arch"] = "dav-c220"
-    else :
-        pto_arch = "a5"
+    else:
         os.environ["npu_arch"] = "dav-c310"
 
     # step 1, Program -> PtoAs-mlir
     codegen = PTOCodegen()
     mlir_code = _get_mlir_code(codegen.generate(prog))
-    if has_cross_sync :
+
+    # Auto-detect cross-core sync from IR
+    has_cross_sync = "pto.sync.set" in mlir_code
+    if has_cross_sync:
         mlir_code = _inject_set_ffts_to_mlir(mlir_code)
     with open(ir_path, "w") as f:
         f.write(mlir_code)
@@ -530,7 +545,7 @@ def compile(prog, clean_up=False, timeout=20, arch: str = "dav-c220", has_cross_
     # need https://github.com/zhangstevenunity/PTOAS/issues/10
     # Note: --pto-level=level3 is required for addr operand support
     result = subprocess.run(
-        ["ptoas", ir_path, "--enable-insert-sync", "--pto-level=level3", f"--pto-arch={pto_arch}", "-o", raw_cpp_path],
+        ["ptoas", ir_path, "--enable-insert-sync", "--pto-level=level3", f"--pto-arch={arch}", "-o", raw_cpp_path],
         check=False, timeout=timeout, capture_output=True
     )
     if result.returncode != 0:
@@ -551,7 +566,7 @@ def compile(prog, clean_up=False, timeout=20, arch: str = "dav-c220", has_cross_
                 break
     if kernel_name is None:
         raise RuntimeError("Could not find kernel name in generated C++ code")
-    if has_cross_sync :
+    if has_cross_sync:
         kernel_params = kernel_params[:-1]
     caller_content = _generate_caller_cpp(
         kernel_params=kernel_params,
@@ -576,8 +591,7 @@ def compile(prog, clean_up=False, timeout=20, arch: str = "dav-c220", has_cross_
         f"-I{ASCEND_HOME_PATH}/include/experiment/msprof",
     ]
     
-    arch = _normalize_arch(arch)
-    flags = _build_bisheng_flags(PTO_LIB_PATH, arch)
+    flags = _build_bisheng_flags(PTO_LIB_PATH, arch, content)
     flags.extend(runtime_includes)
     result = subprocess.run(
         ["bisheng", *flags, final_kernel, "-L", LD_LIB_PATH, "-lruntime", "-o", lib_path],

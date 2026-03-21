@@ -132,7 +132,7 @@ def static_matmul_add_kernel(
 
 @fe.jit()
 def test_static_matmul_add():
-    compiled_lib = fe.compile(static_matmul_add_kernel, arch="dav-c220")
+    compiled_lib = fe.compile(static_matmul_add_kernel, arch="a3")
     print("compiled lib path:", compiled_lib.lib_path)
 
     device = "npu:7"

@@ -104,7 +104,6 @@ def make_tile(
         kwargs["memref_addr"] = addr if isinstance(addr, int) else addr
         kwargs["memref_size"] = size
         kwargs["memref_id"] = mem_id
-        print(f"addr is {addr} size is {size} id is {mem_id}")
     return _ir_core.create_op_call("block.make_tile", args, kwargs, actual_span)
 
 

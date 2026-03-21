@@ -58,7 +58,7 @@ def dynamic_subs_kernel(
 
 @fe.jit()
 def test_dynamic_subs():
-    compiled_lib = fe.compile(dynamic_subs_kernel, arch="dav-c220-vec")
+    compiled_lib = fe.compile(dynamic_subs_kernel, arch="a3")
     print("compiled lib path:", compiled_lib.lib_path)
 
     device = "npu:1"

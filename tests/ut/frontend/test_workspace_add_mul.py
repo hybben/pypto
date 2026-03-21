@@ -263,7 +263,7 @@ def workspace_add_mul_db_kernel(
 
 @fe.jit()
 def test_workspace_add_mul():
-    compiled_lib = fe.compile(workspace_add_mul_kernel, arch="dav-c220-vec")
+    compiled_lib = fe.compile(workspace_add_mul_kernel, arch="a3")
     print("compiled lib path:", compiled_lib.lib_path)
 
     device = "npu:7"
@@ -293,7 +293,7 @@ def test_workspace_add_mul():
 
 @fe.jit()
 def test_workspace_add_mul_db():
-    compiled_lib = fe.compile(workspace_add_mul_db_kernel, arch="dav-c220-vec")
+    compiled_lib = fe.compile(workspace_add_mul_db_kernel, arch="a3")
     print("compiled lib path:", compiled_lib.lib_path)
 
     device = "npu:7"

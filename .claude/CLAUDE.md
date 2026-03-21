@@ -19,7 +19,7 @@ Please follow the following rules when working on the PyPTO project:
   for lowering pypto-ir to PTOAS MLIR (emitted as string).
 - The PTOAS MLIR string can be compiled by the `ptoas` tool, which will be 
   available in `PATH` after executing `source compile.sh`.
-
+- The lower pto-isa definition is located at /data/g00895580/pto-isa/pto-isa/docs/isa/.
 ## Project Rules
 ## Build Commands
 ### Full configure, compile，build, install

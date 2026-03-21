@@ -83,7 +83,7 @@ def tiling_op_kernel(
 
 @fe.jit()
 def test_tiling_op():
-    compiled_lib = fe.compile(tiling_op_kernel, arch="dav-c220-vec")
+    compiled_lib = fe.compile(tiling_op_kernel, arch="a3")
     device = "npu:1"
     torch.npu.set_device(device)
     shapes = [[64, 128], [128, 256]]

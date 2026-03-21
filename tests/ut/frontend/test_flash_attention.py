@@ -425,7 +425,7 @@ def test_flash_attention_multicore():
         )
 
     log("stage 0: compile")
-    compiled_lib = fe.compile(flash_attention_kernel, arch="dav-c220")
+    compiled_lib = fe.compile(flash_attention_kernel, arch="a3")
     print("compiled lib path:", compiled_lib.lib_path, flush=True)
 
     device = "npu:7"
