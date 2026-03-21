@@ -14,10 +14,13 @@
 #include <cstdint>
 #include <map>
 #include <numeric>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "pypto/backend/common/cann_runtime.h"
+#include "pypto/core/logging.h"
 #include "pypto/ir/memref.h"
 #include "pypto/ir/pipe.h"
 
@@ -119,23 +122,34 @@ int SoC::TotalCoreCount() const {
 const SoC& Create910BSoC() {
   // Singleton instance shared by all backends
   static SoC soc = []() {
+    auto& rt = CannRuntime::Instance();
+
+    auto query_u64 = [&](const std::string& col, const std::string& key, uint64_t fallback) -> uint64_t {
+      std::string val;
+      if (rt.IsAvailable() && rt.GetSocSpec(col, key, val)) {
+        return std::stoull(val);
+      }
+      LOG_WARN << "SoC spec query failed for [" << col << "]." << key << ", using default: " << fallback;
+      return fallback;
+    };
+
     // AIC (CUBE) core configuration
-    Core aic_core(ir::CoreType::CUBE, {
-                                          Mem(ir::MemorySpace::Mat, 512ULL * 1024, 128),  // 512KB Mat
-                                          Mem(ir::MemorySpace::Left, 64ULL * 1024, 64),   // 64KB Left
-                                          Mem(ir::MemorySpace::Right, 64ULL * 1024, 64),  // 64KB Right
-                                          Mem(ir::MemorySpace::Acc, 128ULL * 1024, 128)   // 128KB Acc
-                                      });
+    Core aic_core(ir::CoreType::CUBE,
+                  {Mem(ir::MemorySpace::Mat, query_u64("AICoreSpec", "l1_size", 512ULL * 1024), 128),
+                   Mem(ir::MemorySpace::Left, query_u64("AICoreSpec", "l0_a_size", 64ULL * 1024), 64),
+                   Mem(ir::MemorySpace::Right, query_u64("AICoreSpec", "l0_b_size", 64ULL * 1024), 64),
+                   Mem(ir::MemorySpace::Acc, query_u64("AICoreSpec", "l0_c_size", 128ULL * 1024), 128)});
 
     // AIV (VECTOR) core configuration
-    Core aiv_core(ir::CoreType::VECTOR, {
-                                            Mem(ir::MemorySpace::Vec, 192ULL * 1024, 128),  // 192KB Vec
-                                        });
+    Core aiv_core(ir::CoreType::VECTOR,
+                  {Mem(ir::MemorySpace::Vec, query_u64("AICoreSpec", "ub_size", 192ULL * 1024), 128)});
 
     Cluster aic_cluster(aic_core, 1);  // 1 core per cluster
     Cluster aiv_cluster(aiv_core, 1);  // 1 core per cluster
 
-    Die die({{aic_cluster, 24}, {aiv_cluster, 48}});  // 24 AIC cores and 48 AIV cores per die
+    int aic_count = static_cast<int>(query_u64("SoCInfo", "cube_core_cnt", 24));
+    int aiv_count = static_cast<int>(query_u64("SoCInfo", "vector_core_cnt", 48));
+    Die die({{aic_cluster, aic_count}, {aiv_cluster, aiv_count}});
 
     // Memory hierarchy graph for path finding
     std::map<ir::MemorySpace, std::vector<ir::MemorySpace>> mem_graph;

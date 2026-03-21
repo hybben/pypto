@@ -55,6 +55,7 @@ target_include_directories(${LIBRARY_NAME} PRIVATE
 target_link_libraries(${LIBRARY_NAME} PRIVATE
     libbacktrace
     msgpackc-cxx
+    dl
 )
 
 # Handle installation based on build mode

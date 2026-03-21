@@ -172,6 +172,7 @@ set(PYPTO_SOURCES
     src/backend/common/backend.cpp
     src/backend/common/backend_config.cpp
     src/backend/common/backend_registry.cpp
+    src/backend/common/cann_runtime.cpp
     src/backend/common/soc.cpp
 )
 
