@@ -190,6 +190,30 @@ def make_tile(
 # Memory operations
 # ---------------------------------------------------------------------------
 
+def _check_nd_load_bounds(out: "Tile", tensor: "Tensor") -> None:
+    """Validate that tile dims do not exceed tensor dims for ND loads.
+
+    Compares static (ConstInt) shape dimensions between the tile and tensor.
+    Raises ValueError if a tile dimension exceeds the corresponding tensor
+    dimension, which would cause an out-of-bounds partition_view.
+    """
+    tile_type = out.unwrap().type
+    tensor_type = tensor.unwrap().type
+    tile_shape = getattr(tile_type, "shape", None)
+    tensor_shape = getattr(tensor_type, "shape", None)
+    if tile_shape is None or tensor_shape is None:
+        return
+    for d, (t_dim, s_dim) in enumerate(zip(tile_shape, tensor_shape)):
+        t_val = getattr(t_dim, "value", None)
+        s_val = getattr(s_dim, "value", None)
+        if t_val is not None and s_val is not None and t_val > s_val:
+            raise ValueError(
+                f"manual.load: tile dimension {d} ({t_val}) exceeds tensor "
+                f"dimension ({s_val}). If the tensor needs transposing, "
+                f'use layout="dn".'
+            )
+
+
 def load(
     out: Tile,
     tensor: Tensor,
@@ -209,6 +233,8 @@ def load(
         layout: Tensor memory layout. ``"dn"`` for column-major (DN) layout,
             which lets TLOAD transpose on-chip. Default is row-major (ND).
     """
+    if layout != "dn":
+        _check_nd_load_bounds(out, tensor)
     shapes_tuple = _ir_core.MakeTuple([], _span()) if shapes is None else _to_make_tuple(shapes)
     kwargs: dict = {}
     if layout is not None:

@@ -295,6 +295,21 @@ static std::string MakeManualLoadCodegenPTO(const CallPtr& op, codegen::CodegenB
     tensor_view_type = codegen.GetTensorViewTypeString(tensor_type.get());
     row_off = codegen.GetExprAsCode(offsets_tuple->elements_[0]);
     col_off = codegen.GetExprAsCode(offsets_tuple->elements_[1]);
+
+    // Static bounds check: tile dimensions must not exceed tensor dimensions.
+    // Catches cases like loading a [64,128] tile from a [128,64] tensor (column overflow).
+    INTERNAL_CHECK(tensor_type->shape_.size() == 2)
+        << "manual.load ND layout: tensor must be 2D";
+    for (size_t d = 0; d < 2; ++d) {
+      auto tensor_dim = As<ir::ConstInt>(tensor_type->shape_[d]);
+      auto tile_dim = As<ir::ConstInt>(tile_type->shape_[d]);
+      if (tensor_dim && tile_dim) {
+        CHECK(tile_dim->value_ <= tensor_dim->value_)
+            << "manual.load: tile dimension " << d << " (" << tile_dim->value_
+            << ") exceeds tensor dimension (" << tensor_dim->value_
+            << "). If the tensor needs transposing, use layout=\"dn\".";
+      }
+    }
   }
 
   std::string partition_view = codegen.NewTemp();
