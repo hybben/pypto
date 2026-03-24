@@ -1020,6 +1020,45 @@ REGISTER_BACKEND_OP(Backend910B_PTO, "system.sync_dst")
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
       return MakeSyncDstCodegenPTO(op, codegen);
     });
+
+// Dynamic event_id variants (intra-core)
+static std::string MakeSyncSrcDynCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+  auto set_pipe = op->GetKwarg<int>("set_pipe");
+  auto wait_pipe = op->GetKwarg<int>("wait_pipe");
+  std::string event_id = codegen.GetExprAsCode(op->args_[0]);
+  std::ostringstream oss;
+  oss << "pto.set_flag_dyn[<PIPE_" << GetPipeTypeName(static_cast<ir::PipeType>(set_pipe))
+      << ">, <PIPE_" << GetPipeTypeName(static_cast<ir::PipeType>(wait_pipe))
+      << ">, " << event_id << "]";
+  codegen.Emit(oss.str());
+  return "";
+}
+
+static std::string MakeSyncDstDynCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+  auto set_pipe = op->GetKwarg<int>("set_pipe");
+  auto wait_pipe = op->GetKwarg<int>("wait_pipe");
+  std::string event_id = codegen.GetExprAsCode(op->args_[0]);
+  std::ostringstream oss;
+  oss << "pto.wait_flag_dyn[<PIPE_" << GetPipeTypeName(static_cast<ir::PipeType>(set_pipe))
+      << ">, <PIPE_" << GetPipeTypeName(static_cast<ir::PipeType>(wait_pipe))
+      << ">, " << event_id << "]";
+  codegen.Emit(oss.str());
+  return "";
+}
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "system.sync_src_dyn")
+    .set_pipe(ir::PipeType::S)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeSyncSrcDynCodegenPTO(op, codegen);
+    });
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "system.sync_dst_dyn")
+    .set_pipe(ir::PipeType::S)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeSyncDstDynCodegenPTO(op, codegen);
+    });
 // Barrier operations
 static std::string MakeBarVCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
   auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
@@ -1089,6 +1128,41 @@ REGISTER_BACKEND_OP(Backend910B_PTO, "system.wait_cross_core")
     .set_pipe(ir::PipeType::S)
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
       return MakeWaitCrossCoreCodegenPTO(op, codegen);
+    });
+
+// Dynamic event_id variants (cross-core)
+static std::string MakeSetCrossCoreDynCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+  auto pipe = op->GetKwarg<int>("pipe");
+  std::string event_id = codegen.GetExprAsCode(op->args_[0]);
+  std::ostringstream oss;
+  oss << "pto.sync.set <PIPE_" << GetPipeTypeName(static_cast<ir::PipeType>(pipe))
+      << ">, " << event_id;
+  codegen.Emit(oss.str());
+  return "";
+}
+
+static std::string MakeWaitCrossCoreDynCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+  auto pipe = op->GetKwarg<int>("pipe");
+  std::string event_id = codegen.GetExprAsCode(op->args_[0]);
+  std::ostringstream oss;
+  oss << "pto.sync.wait <PIPE_" << GetPipeTypeName(static_cast<ir::PipeType>(pipe))
+      << ">, " << event_id;
+  codegen.Emit(oss.str());
+  return "";
+}
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "system.set_cross_core_dyn")
+    .set_pipe(ir::PipeType::S)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeSetCrossCoreDynCodegenPTO(op, codegen);
+    });
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "system.wait_cross_core_dyn")
+    .set_pipe(ir::PipeType::S)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeWaitCrossCoreDynCodegenPTO(op, codegen);
     });
 
 static std::string MakeSystemSyncAllCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
@@ -1173,6 +1247,7 @@ static std::string MakeSystemSyncAllCodegenPTO(const CallPtr& op, codegen::Codeg
   }
   return "";
 }
+
 REGISTER_BACKEND_OP(Backend910B_PTO, "system.sync_all")
     .set_pipe(ir::PipeType::S)
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {

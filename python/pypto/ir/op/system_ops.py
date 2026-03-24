@@ -15,7 +15,7 @@ System operations handle hardware synchronization primitives:
 """
 
 from pypto.pypto_core import ir as _ir_core
-from pypto.pypto_core.ir import Call, PipeType, Span
+from pypto.pypto_core.ir import Call, Expr, PipeType, Span
 
 from ..utils import _get_span_or_capture
 
@@ -25,7 +25,7 @@ def _create_sync_op(
     *,
     set_pipe: PipeType,
     wait_pipe: PipeType,
-    event_id: int,
+    event_id: int | Expr,
     span: Span | None,
 ) -> Call:
     """Create a flag-based synchronization operation.
@@ -34,10 +34,13 @@ def _create_sync_op(
         op_name: Operation name (e.g., "system.sync_src")
         set_pipe: Pipe that sets the flag
         wait_pipe: Pipe that waits on the flag
-        event_id: Event identifier
+        event_id: Event identifier (int for static, Expr for dynamic)
         span: Optional source span for debugging
     """
     actual_span = _get_span_or_capture(span, frame_offset=2)
+    if isinstance(event_id, Expr):
+        kwargs = {"set_pipe": set_pipe, "wait_pipe": wait_pipe}
+        return _ir_core.create_op_call(op_name + "_dyn", [event_id], kwargs, actual_span)
     kwargs = {"set_pipe": set_pipe, "wait_pipe": wait_pipe, "event_id": event_id}
     return _ir_core.create_op_call(op_name, [], kwargs, actual_span)
 
@@ -57,7 +60,7 @@ def sync_src(
     *,
     set_pipe: PipeType,
     wait_pipe: PipeType,
-    event_id: int,
+    event_id: int | Expr,
     span: Span | None = None,
 ) -> Call:
     """Send a synchronization signal (Set Flag).
@@ -80,7 +83,7 @@ def sync_dst(
     *,
     set_pipe: PipeType,
     wait_pipe: PipeType,
-    event_id: int,
+    event_id: int | Expr,
     span: Span | None = None,
 ) -> Call:
     """Wait for a synchronization signal (Wait Flag).
@@ -116,47 +119,46 @@ def bar_all(*, span: Span | None = None) -> Call:
 def set_cross_core(
     *,
     pipe: PipeType,
-    event_id: int,
+    event_id: int | Expr,
     span: Span | None = None,
 ) -> Call:
     """Set for a synchronization signal (Cross core).
 
     Args:
         pipe: Pipe that sets the flag
-        event_id: Event identifier
+        event_id: Event identifier (int for static, Expr for dynamic)
         span: Optional source span for debugging (auto-captured if not provided)
 
     Returns:
         Call expression for system.set_cross_core
     """
-    kwargs = {
-        "pipe": pipe,
-        "event_id": event_id,
-    }
     actual_span = _get_span_or_capture(span)
+    if isinstance(event_id, Expr):
+        return _ir_core.create_op_call("system.set_cross_core_dyn", [event_id], {"pipe": pipe}, actual_span)
+    kwargs = {"pipe": pipe, "event_id": event_id}
     return _ir_core.create_op_call("system.set_cross_core", [], kwargs, actual_span)
 
 def wait_cross_core(
     *,
     pipe: PipeType,
-    event_id: int,
+    event_id: int | Expr,
     span: Span | None = None,
 ) -> Call:
     """Wait for a synchronization signal (Cross core).
 
     Args:
         pipe: Pipe that waits the flag
-        event_id: Event identifier
+        event_id: Event identifier (int for static, Expr for dynamic)
         span: Optional source span for debugging (auto-captured if not provided)
 
     Returns:
         Call expression for system.wait_cross_core
     """
-    kwargs = {
-        "pipe": pipe,
-        "event_id": event_id,
-    }
     actual_span = _get_span_or_capture(span)
+
+    if isinstance(event_id, Expr):
+        return _ir_core.create_op_call("system.wait_cross_core_dyn", [event_id], {"pipe": pipe}, actual_span)
+    kwargs = {"pipe": pipe, "event_id": event_id}
     return _ir_core.create_op_call("system.wait_cross_core", [], kwargs, actual_span)
 
 def sync_all(

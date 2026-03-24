@@ -1363,16 +1363,18 @@ class ASTParser:
 
     _SYNC_OP_NAMES: frozenset[str] = frozenset({"sync_src", "sync_dst"})
 
-    def _try_expand_sync_op_stmt(self, node: ast.expr) -> bool:
-        """Try to expand a system sync-op call with a subscript event_id.
+    def _expand_stmt_level(self, node: ast.expr) -> bool:
+        """Try to expand a system sync-op call with a subscript event_id at statement level.
 
         When a sync op is written as:
             pl.system.sync_src(..., event_id=event_ids[buf_idx])
         where ``event_ids`` is a tuple of integer constants, this expands it
         into an if-else chain so each branch contains a sync call with a
-        static constant event_id (required by the PTOAS hardware backend).
+        static constant event_id.
 
         Returns True if expansion was performed (caller should skip normal handling).
+
+        Note: kept for potential future statement-level expansion use cases.
         """
         if not isinstance(node, ast.Call):
             return False
@@ -1470,12 +1472,6 @@ class ASTParser:
         Args:
             stmt: Expr AST node
         """
-        # Special case: system sync ops with subscript event_id are expanded into
-        # an IfStmt chain so each branch can use a compile-time-constant event_id.
-        # This must happen before parse_expression to avoid emitting a phi var.
-        if self._try_expand_sync_op_stmt(stmt.value):
-            return
-
         expr = self.parse_expression(stmt.value)
         span = self.span_tracker.get_span(stmt)
 

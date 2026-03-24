@@ -57,6 +57,24 @@ REGISTER_OP("system.sync_dst")
     .set_attr<int>("event_id")
     .f_deduce_type(DeduceUnknownType);
 
+// Register system.sync_src_dyn (Set Flag, dynamic event_id)
+REGISTER_OP("system.sync_src_dyn")
+    .set_description("Send a synchronization signal with dynamic event_id (Set Flag)")
+    .set_op_category("SyncOp")
+    .add_argument("event_id", "Dynamic event ID (ScalarType INDEX)")
+    .set_attr<int>("set_pipe")
+    .set_attr<int>("wait_pipe")
+    .f_deduce_type(DeduceUnknownType);
+
+// Register system.sync_dst_dyn (Wait Flag, dynamic event_id)
+REGISTER_OP("system.sync_dst_dyn")
+    .set_description("Wait for a synchronization signal with dynamic event_id (Wait Flag)")
+    .set_op_category("SyncOp")
+    .add_argument("event_id", "Dynamic event ID (ScalarType INDEX)")
+    .set_attr<int>("set_pipe")
+    .set_attr<int>("wait_pipe")
+    .f_deduce_type(DeduceUnknownType);
+
 // Register system.bar_v (Vector Barrier)
 // Attributes: None
 REGISTER_OP("system.bar_v")
@@ -99,6 +117,22 @@ REGISTER_OP("system.wait_cross_core")
     .no_argument()
     .set_attr<int>("pipe")
     .set_attr<int>("event_id")
+    .f_deduce_type(DeduceUnknownType);
+
+// Register system.set_cross_core_dyn (Set Cross Core Flag, dynamic event_id)
+REGISTER_OP("system.set_cross_core_dyn")
+    .set_description("Cross-core sync set with dynamic event_id")
+    .set_op_category("SyncOp")
+    .add_argument("event_id", "Dynamic event ID (ScalarType INDEX)")
+    .set_attr<int>("pipe")
+    .f_deduce_type(DeduceUnknownType);
+
+// Register system.wait_cross_core_dyn (Wait Cross Core Flag, dynamic event_id)
+REGISTER_OP("system.wait_cross_core_dyn")
+    .set_description("Cross-core sync wait with dynamic event_id")
+    .set_op_category("SyncOp")
+    .add_argument("event_id", "Dynamic event ID (ScalarType INDEX)")
+    .set_attr<int>("pipe")
     .f_deduce_type(DeduceUnknownType);
 
 // Register system.sync_all (Global Core Synchronization)
