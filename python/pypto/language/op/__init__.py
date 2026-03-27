@@ -87,6 +87,8 @@ from .block_ops import (
     vec_move,
     xor,
     xors,
+    getval,
+    setval,
 )
 
 # Promoted tensor-only ops (accessible as pl.create_tensor, etc.)
@@ -190,6 +192,8 @@ __all__ = [
     "lrelu",
     "sel",
     "sels",
+    "getval",
+    "setval",
     # Promoted tensor-only
     "create_tensor",
     "assemble",

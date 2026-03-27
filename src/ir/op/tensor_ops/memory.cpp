@@ -306,5 +306,82 @@ REGISTER_OP("tensor.dim")
       return DeduceTensorDimType(args, kwargs);
     });
 
+TypePtr DeduceTensorGetValType(const std::vector<ExprPtr>& args,
+                              const std::vector<std::pair<std::string, std::any>>& kwargs) {
+  // tensor.getval: Read a scalar value from a tensor at linear offset
+  // Args: (tensor, offset)
+  // Returns: ScalarType with tensor's element dtype
+  CHECK(args.size() == 2) << "tensor.getval requires exactly 2 arguments (tensor, offset), but got "
+                          << args.size();
+
+  // First argument must be TensorType
+  auto tensor_type = As<TensorType>(args[0]->GetType());
+  CHECK(tensor_type) << "tensor.getval requires first argument to be a TensorType, but got "
+                     << args[0]->GetType()->TypeName();
+
+  // Second argument must be ScalarType with integer dtype (linear offset)
+  auto offset_type = As<ScalarType>(args[1]->GetType());
+  CHECK(offset_type) << "tensor.getval requires offset to be ScalarType, but got "
+                    << args[1]->GetType()->TypeName();
+  CHECK(offset_type->dtype_.IsInt())
+      << "tensor.getval offset must have integer dtype, but got "
+      << offset_type->dtype_.ToString();
+
+  // Return ScalarType with tensor's element dtype
+  return std::make_shared<ScalarType>(tensor_type->dtype_);
+}
+
+REGISTER_OP("tensor.getval")
+    .set_op_category("TensorOp")
+    .set_description("Read a scalar value from a tensor at linear offset")
+    .add_argument("tensor", "Input tensor (TensorType)")
+    .add_argument("offset", "Linear element offset (ScalarType with integer dtype)")
+    .f_deduce_type([](const std::vector<ExprPtr>& args,
+                       const std::vector<std::pair<std::string, std::any>>& kwargs) {
+      return DeduceTensorGetValType(args, kwargs);
+    });
+
+TypePtr DeduceTensorSetValType(const std::vector<ExprPtr>& args,
+                              const std::vector<std::pair<std::string, std::any>>& kwargs) {
+  // tensor.setval: Write a scalar value to a tensor at linear offset
+  // Args: (tensor, offset, value)
+  // Returns: TensorType (same as input tensor)
+  CHECK(args.size() == 3) << "tensor.setval requires exactly 3 arguments (tensor, offset, value), but got "
+                          << args.size();
+
+  // First argument must be TensorType
+  auto tensor_type = As<TensorType>(args[0]->GetType());
+  CHECK(tensor_type) << "tensor.setval requires first argument to be a TensorType, but got "
+                     << args[0]->GetType()->TypeName();
+
+  // Second argument must be ScalarType with integer dtype (linear offset)
+  auto offset_type = As<ScalarType>(args[1]->GetType());
+  CHECK(offset_type) << "tensor.setval requires offset to be ScalarType, but got "
+                    << args[1]->GetType()->TypeName();
+  CHECK(offset_type->dtype_.IsInt())
+      << "tensor.setval offset must have integer dtype, but got "
+      << offset_type->dtype_.ToString();
+
+  // Third argument must be ScalarType (value to write)
+  auto value_type = As<ScalarType>(args[2]->GetType());
+  CHECK(value_type) << "tensor.setval requires value to be ScalarType, but got "
+                    << args[2]->GetType()->TypeName();
+
+  // Value type should match tensor (or be compatible for implicit conversion)
+  // For now, we just return the tensor type with same shape and dtype
+  return std::make_shared<TensorType>(tensor_type->shape_, tensor_type->dtype_);
+}
+
+REGISTER_OP("tensor.setval")
+    .set_op_category("TensorOp")
+    .set_description("Write a scalar value to a tensor at linear offset")
+    .add_argument("tensor", "Input tensor (TensorType)")
+    .add_argument("offset", "Linear element offset (ScalarType with integer dtype)")
+    .add_argument("value", "Scalar value to write (ScalarType)")
+    .f_deduce_type([](const std::vector<ExprPtr>& args,
+                       const std::vector<std::pair<std::string, std::any>>& kwargs) {
+      return DeduceTensorSetValType(args, kwargs);
+    });
+
 }  // namespace ir
 }  // namespace pypto

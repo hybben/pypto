@@ -823,9 +823,6 @@ struct SimpleOpEntry {
 
 // clang-format off
 static const SimpleOpEntry kSimpleOps[] = {
-    // Tile utility operations
-    {"block.getval",          "pto.tgetval",          2},
-    {"block.setval",          "pto.tsetval",          2},
     // Memory operations
     {"block.mgather",         "pto.tmgather",         2},
     {"block.mscatter",        "pto.tmscatter",        2},
@@ -1535,5 +1532,150 @@ REGISTER_BACKEND_OP(Backend910B_PTO, "system.sync_all")
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
       return MakeSystemSyncAllCodegenPTO(op, codegen);
     });
+
+// Helper function for BlockGetVal
+static std::string MakeBlockGetValCodegenPTO(const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+  CHECK(op->args_.size() == 2) << "block.getval requires 2 arguments (tile, index), but got "
+                                << op->args_.size();
+
+  std::string tile = codegen.GetExprAsCode(op->args_[0]);
+  std::string index = codegen.GetExprAsCode(op->args_[1]);
+  std::string tile_type = codegen.GetExprTypeAnnotation(op->args_[0]);
+
+  // Create a new SSA variable for the scalar result
+  std::string result = codegen.NewTemp();
+
+  std::ostringstream oss;
+  oss << result << " = pto.tgetval ins(" << tile << ", " << index;
+  if (!tile_type.empty()) oss << " : " << tile_type;
+  oss << ", index)";
+
+  // Get the result type (scalar type matching tile)
+  auto result_type = As<ir::ScalarType>(op->GetType());
+  INTERNAL_CHECK(result_type) << "block.getval result must be ScalarType";
+  std::string result_type_str = codegen.GetTypeString(result_type->dtype_);
+  if (!result_type_str.empty()) oss << " outs : " << result_type_str;
+
+  codegen.Emit(oss.str());
+
+  // Register the result variable mapping
+  codegen.SetVarMlirName(codegen.GetCurrentResultVarName(), result);
+
+  return "";
+}
+
+// Helper function for BlockSetVal
+static std::string MakeBlockSetValCodegenPTO(const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+  CHECK(op->args_.size() == 3) << "block.setval requires 3 arguments (tile, index, value), but got "
+                                << op->args_.size();
+
+  std::string tile = codegen.GetExprAsCode(op->args_[0]);
+  std::string index = codegen.GetExprAsCode(op->args_[1]);
+  std::string value = codegen.GetExprAsCode(op->args_[2]);
+  std::string tile_type = codegen.GetExprTypeAnnotation(op->args_[0]);
+
+  std::ostringstream oss;
+  oss << "pto.tsetval ins(" << index << ", " << value;
+  if (!tile_type.empty()) {
+    auto value_type = As<ir::ScalarType>(op->args_[2]->GetType());
+    INTERNAL_CHECK(value_type) << "block.setval value must be ScalarType";
+    oss << " : index, " << codegen.GetTypeString(value_type->dtype_);
+  }
+  oss << ") outs(" << tile;
+  if (!tile_type.empty()) oss << " : " << tile_type;
+  oss << ")";
+
+  codegen.Emit(oss.str());
+
+  return "";
+}
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "block.getval")
+    .set_pipe(ir::PipeType::S)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeBlockGetValCodegenPTO(op, codegen);
+    });
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "block.setval")
+    .set_pipe(ir::PipeType::S)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeBlockSetValCodegenPTO(op, codegen);
+    });
+
+// Helper function for TensorGetVal
+static std::string MakeTensorGetValCodegenPTO(const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+  CHECK(op->args_.size() == 2) << "tensor.getval requires 2 arguments (tensor, offset), but got "
+                                << op->args_.size();
+
+  std::string tensor = codegen.GetExprAsCode(op->args_[0]);
+  std::string offset = codegen.GetExprAsCode(op->args_[1]);
+
+  // Get the tensor pointer
+  auto tensor_var = As<ir::Var>(op->args_[0]);
+  INTERNAL_CHECK(tensor_var) << "tensor.getval requires tensor to be a Var";
+  std::string tensor_ptr = codegen.GetTensorPtr(tensor_var);
+
+  // Create a new SSA variable for the scalar result
+  std::string result = codegen.NewTemp();
+
+  // Get the result type (scalar type matching tensor)
+  auto result_type = As<ir::ScalarType>(op->GetType());
+  INTERNAL_CHECK(result_type) << "tensor.getval result must be ScalarType";
+  std::string result_type_str = codegen.GetTypeString(result_type->dtype_);
+
+  std::ostringstream oss;
+  oss << result << " = pto.load_scalar " << tensor_ptr << "[" << offset << "] : !pto.ptr<" << result_type_str << "> -> " << result_type_str;
+
+  codegen.Emit(oss.str());
+
+  // Register the result variable mapping
+  codegen.SetVarMlirName(codegen.GetCurrentResultVarName(), result);
+
+  return "";
+}
+
+// Helper function for TensorSetVal
+static std::string MakeTensorSetValCodegenPTO(const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+  CHECK(op->args_.size() == 3) << "tensor.setval requires 3 arguments (tensor, offset, value), but got "
+                                << op->args_.size();
+
+  std::string tensor = codegen.GetExprAsCode(op->args_[0]);
+  std::string offset = codegen.GetExprAsCode(op->args_[1]);
+  std::string value = codegen.GetExprAsCode(op->args_[2]);
+
+  // Get the tensor pointer
+  auto tensor_var = As<ir::Var>(op->args_[0]);
+  INTERNAL_CHECK(tensor_var) << "tensor.setval requires tensor to be a Var";
+  std::string tensor_ptr = codegen.GetTensorPtr(tensor_var);
+
+  // Get the value type (scalar type matching tensor)
+  auto tensor_type = As<ir::TensorType>(op->args_[0]->GetType());
+  INTERNAL_CHECK(tensor_type) << "tensor.setval requires tensor to be TensorType";
+  std::string value_type_str = codegen.GetTypeString(tensor_type->dtype_);
+
+  std::ostringstream oss;
+  oss << "pto.store_scalar " << value << ", " << tensor_ptr << "[" << offset << "] : !pto.ptr<" << value_type_str << ">, " << value_type_str;
+
+  codegen.Emit(oss.str());
+
+  return "";
+}
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "tensor.getval")
+    .set_pipe(ir::PipeType::S)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeTensorGetValCodegenPTO(op, codegen);
+    });
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "tensor.setval")
+    .set_pipe(ir::PipeType::S)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeTensorSetValCodegenPTO(op, codegen);
+    });
+
 }  // namespace backend
 }  // namespace pypto

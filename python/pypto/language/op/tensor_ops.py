@@ -38,6 +38,8 @@ __all__ = [
     "assemble",
     "reshape",
     "transpose",
+    "getval",
+    "setval",
 ]
 
 from pypto.ir.op import tensor_ops as _ir_ops
@@ -406,4 +408,49 @@ def transpose(tensor: Tensor, axis1: int, axis2: int) -> Tensor:
     """
     tensor_expr = tensor.unwrap()
     call_expr = _ir_ops.transpose(tensor_expr, axis1, axis2)
+    return Tensor(expr=call_expr)
+
+def getval(tensor: Tensor, offset: int | Expr | Scalar) -> Scalar:
+    """Read a single element from a tensor at a linear offset.
+
+    This operation reads a scalar value from a tensor at the specified linear offset.
+    Maps to pto.tgetval operation.
+
+    Args:
+        tensor: Input tensor
+        offset: Linear element offset (int/Expr/Scalar)
+
+    Returns:
+        Scalar wrapping getval operation
+
+    Example:
+        >>> value = tensor_ops.getval(tensor, 0)  # Get first element
+    """
+    tensor_expr = tensor.unwrap()
+    offset_expr = offset.unwrap() if isinstance(offset, Scalar) else offset
+    call_expr = _ir_ops.getval(tensor_expr, offset_expr)
+    return Scalar(expr=call_expr)
+
+
+def setval(tensor: Tensor, offset: int | Expr | Scalar, value: int | float | Expr | Scalar) -> Tensor:
+    """Write a scalar value into a tensor at a linear offset.
+
+    This operation writes a scalar value to a tensor at the specified linear offset.
+    Maps to pto.tsetval operation.
+
+    Args:
+        tensor: Destination tensor
+        offset: Linear element offset (int/Expr/Scalar)
+        value: Scalar value to write (int/float/Expr/Scalar)
+
+    Returns:
+        Tensor wrapping setval operation
+
+    Example:
+        >>> tensor = tensor_ops.setval(tensor, 0, 1.0)  # Set first element to 1.0
+    """
+    tensor_expr = tensor.unwrap()
+    offset_expr = offset.unwrap() if isinstance(offset, Scalar) else offset
+    value_expr = value.unwrap() if isinstance(value, Scalar) else value
+    call_expr = _ir_ops.setval(tensor_expr, offset_expr, value_expr)
     return Tensor(expr=call_expr)

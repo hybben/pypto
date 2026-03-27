@@ -485,5 +485,93 @@ REGISTER_OP("block.full")
       return DeduceBlockFullType(args, kwargs, "block.full");
     });
 
+REGISTER_OP("block.print")
+    .set_op_category("BlockOp")
+    .set_description("Print a tile or tile window for debugging")
+    .add_argument("tile", "Input tile (TileType)")
+    .add_argument("offsets", "Optional static offsets per dimension (MakeTuple of ConstInt)")
+    .add_argument("shapes", "Optional static shape per dimension (MakeTuple of ConstInt)")
+    .f_deduce_type([](const std::vector<ExprPtr>& args,
+                      const std::vector<std::pair<std::string, std::any>>& kwargs) {
+      return DeduceBlockPrintType(args, kwargs, "block.print");
+    });
+
+TypePtr DeduceBlockGetValType(const std::vector<ExprPtr>& args,
+                                   const std::vector<std::pair<std::string, std::any>>& kwargs) {
+  // block.getval: Read a scalar value from a tile at flattened index
+  // Args: (tile, index)
+  // Returns: ScalarType with tile's element dtype
+  CHECK(args.size() == 2) << "block.getval requires exactly 2 arguments (tile, index), but got "
+                          << args.size();
+
+  // First argument must be TileType
+  auto tile_type = As<TileType>(args[0]->GetType());
+  CHECK(tile_type) << "block.getval requires first argument to be a TileType, but got "
+                     << args[0]->GetType()->TypeName();
+
+  // Second argument must be ScalarType with integer dtype (flattened index)
+  auto index_type = As<ScalarType>(args[1]->GetType());
+  CHECK(index_type) << "block.getval requires index to be ScalarType, but got "
+                     << args[1]->GetType()->TypeName();
+  CHECK(index_type->dtype_.IsInt())
+      << "block.getval index must have integer dtype, but got "
+      << index_type->dtype_.ToString();
+
+  // Return ScalarType with tile's element dtype
+  return std::make_shared<ScalarType>(tile_type->dtype_);
+}
+
+REGISTER_OP("block.getval")
+    .set_op_category("BlockOp")
+    .set_description("Read a scalar value from a tile at flattened index")
+    .add_argument("tile", "Input tile (TileType)")
+    .add_argument("index", "Flattened element index in tile layout (ScalarType with integer dtype)")
+    .f_deduce_type([](const std::vector<ExprPtr>& args,
+                       const std::vector<std::pair<std::string, std::any>>& kwargs) {
+      return DeduceBlockGetValType(args, kwargs);
+    });
+
+TypePtr DeduceBlockSetValType(const std::vector<ExprPtr>& args,
+                                   const std::vector<std::pair<std::string, std::any>>& kwargs) {
+  // block.setval: Write a scalar value to a tile at flattened index
+  // Args: (tile, index, value)
+  // Returns: TileType (same as input tile)
+  CHECK(args.size() == 3) << "block.setval requires exactly 3 arguments (tile, index, value), but got "
+                          << args.size();
+
+  // First argument must be TileType
+  auto tile_type = As<TileType>(args[0]->GetType());
+  CHECK(tile_type) << "block.setval requires first argument to be a TileType, but got "
+                     << args[0]->GetType()->TypeName();
+
+  // Second argument must be ScalarType with integer dtype (flattened index)
+  auto index_type = As<ScalarType>(args[1]->GetType());
+  CHECK(index_type) << "block.setval requires index to be ScalarType, but got "
+                     << args[1]->GetType()->TypeName();
+  CHECK(index_type->dtype_.IsInt())
+      << "block.setval index must have integer dtype, but got "
+      << index_type->dtype_.ToString();
+
+  // Third argument must be ScalarType (value to write)
+  auto value_type = As<ScalarType>(args[2]->GetType());
+  CHECK(value_type) << "block.setval requires value to be ScalarType, but got "
+                     << args[2]->GetType()->TypeName();
+
+  // Value type should match tile (or be compatible for implicit conversion)
+  // For now, we just return the tile type with same shape, dtype, and memref
+  return std::make_shared<TileType>(tile_type->shape_, tile_type->dtype_, tile_type->memref_);
+}
+
+REGISTER_OP("block.setval")
+    .set_op_category("BlockOp")
+    .set_description("Write a scalar value to a tile at flattened index")
+    .add_argument("tile", "Input tile (TileType)")
+    .add_argument("index", "Flattened element index in tile layout (ScalarType with integer dtype)")
+    .add_argument("value", "Scalar value to write (ScalarType)")
+    .f_deduce_type([](const std::vector<ExprPtr>& args,
+                       const std::vector<std::pair<std::string, std::any>>& kwargs) {
+      return DeduceBlockSetValType(args, kwargs);
+    });
+
 }  // namespace ir
 }  // namespace pypto

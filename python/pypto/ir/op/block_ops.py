@@ -1740,3 +1740,52 @@ def transpose(tile: Expr, axis1: int, axis2: int, span: Span | None = None) -> C
     args = [tile, axis1_expr, axis2_expr]
 
     return _ir_core.create_op_call("block.transpose", args, {}, actual_span)
+
+def getval(tile: Expr, index: int | Expr, span: Span | None = None) -> Call:
+    """Read a scalar value from a tile at flattened index.
+
+    Args:
+        tile: Input tile expression (TileType)
+        index: Flattened element index in tile layout (int/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression reading a scalar from the tile
+    """
+    actual_span = _get_span_or_capture(span)
+    index_expr = (
+        _normalize_expr(index, actual_span, int_dtype=DataType.INDEX) if not isinstance(index, Expr) else index
+    )
+
+    args = [tile, index_expr]
+    return _ir_core.create_op_call("block.getval", args, {}, actual_span)
+
+
+def setval(tile: Expr, index: int | Expr, value: int | float | Expr, span: Span | None = None) -> Call:
+    """Write a scalar value to a tile at flattened index.
+
+    Args:
+        tile: Input tile expression (TileType)
+        index: Flattened element index in tile layout (int/Expr)
+        value: Scalar value to write (int/float/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression writing a scalar to the tile
+    """
+    actual_span = _get_span_or_capture(span)
+    index_expr = (
+        _normalize_expr(index, actual_span, int_dtype=DataType.INDEX) if not isinstance(index, Expr) else index
+    )
+    if not isinstance(value, Expr):
+        tile_type = tile.type
+        if isinstance(tile_type, _ir_core.TileType):
+            tile_dtype = tile_type.dtype
+            value_expr = _normalize_expr(value, actual_span, int_dtype=tile_dtype, float_dtype=tile_dtype)
+        else:
+            value_expr = _normalize_expr(value, actual_span, int_dtype=DataType.FP32, float_dtype=DataType.FP32)
+    else:
+        value_expr = value
+
+    args = [tile, index_expr, value_expr]
+    return _ir_core.create_op_call("block.setval", args, {}, actual_span)

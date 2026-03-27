@@ -98,6 +98,8 @@ __all__ = [
     "lrelu",
     "sel",
     "sels",
+    "getval",
+    "setval",
 ]
 
 from pypto.ir.op import block_ops as _ir_ops
@@ -1469,4 +1471,37 @@ def sels(lhs: Tile, rhs: Tile, select_mode: int | float | Expr | Scalar) -> Tile
     """
     select_mode_expr = select_mode.unwrap() if isinstance(select_mode, Scalar) else select_mode
     call_expr = _ir_ops.sels(lhs.unwrap(), rhs.unwrap(), select_mode_expr)
+    return Tile(expr=call_expr)
+
+def getval(tile: Tile, index: int | Expr | Scalar) -> Scalar:
+    """Read a scalar value from a tile at flattened index.
+
+    Args:
+        tile: Input tile
+        index: Flattened element index in tile layout
+
+    Returns:
+        Scalar wrapping the getval operation
+    """
+    tile_expr = tile.unwrap()
+    index_expr = index.unwrap() if isinstance(index, Scalar) else index
+    call_expr = _ir_ops.getval(tile_expr, index_expr)
+    return Scalar(expr=call_expr)
+
+
+def setval(tile: Tile, index: int | Expr | Scalar, value: int | float | Expr | Scalar) -> Tile:
+    """Write a scalar value to a tile at flattened index.
+
+    Args:
+        tile: Input tile
+        index: Flattened element index in tile layout
+        value: Scalar value to write (int/float/Expr/Scalar)
+
+    Returns:
+        Tile wrapping the setval operation
+    """
+    tile_expr = tile.unwrap()
+    index_expr = index.unwrap() if isinstance(index, Scalar) else index
+    value_expr = value.unwrap() if isinstance(value, Scalar) else value
+    call_expr = _ir_ops.setval(tile_expr, index_expr, value_expr)
     return Tile(expr=call_expr)

@@ -483,3 +483,47 @@ def transpose(tensor: Expr, axis1: int, axis2: int, span: Span | None = None) ->
     args = [tensor, axis1_expr, axis2_expr]
 
     return _ir_core.create_op_call("tensor.transpose", args, {}, actual_span)
+
+def getval(tensor: Expr, offset: int | Expr, span: Span | None = None) -> Call:
+    """Read a single element from a tensor at a linear offset.
+
+    Args:
+        tensor: Input tensor expression
+        offset: Linear element offset (int or Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for getval operation
+    """
+    actual_span = _get_span_or_capture(span)
+    offset_expr = offset if isinstance(offset, Expr) else ConstInt(offset, DataType.INDEX, actual_span)
+    args = [tensor, offset_expr]
+    return _ir_core.create_op_call("tensor.getval", args, {}, actual_span)
+
+
+def setval(tensor: Expr, offset: int | Expr, value: int | float | Expr, span: Span | None = None) -> Call:
+    """Write a scalar value into a tensor at a linear offset.
+
+    Args:
+        tensor: Destination tensor expression
+        offset: Linear element offset (int or Expr)
+        value: Scalar value to write (int/float/Expr)
+        span: Optional source span for debugging (auto-captured if not provided)
+
+    Returns:
+        Call expression for setval operation
+    """
+    actual_span = _get_span_or_capture(span)
+    offset_expr = offset if isinstance(offset, Expr) else ConstInt(offset, DataType.INDEX, actual_span)
+    if not isinstance(value, Expr):
+        tensor_type = tensor.type
+        if isinstance(tensor_type, _ir_core.TensorType):
+            tensor_dtype = tensor_type.dtype
+            value_expr = _normalize_expr(value, actual_span, int_dtype=tensor_dtype, float_dtype=tensor_dtype)
+        else:
+            value_expr = _normalize_expr(value, actual_span, int_dtype=DataType.FP32, float_dtype=DataType.FP32)
+    else:
+        value_expr = value
+
+    args = [tensor, offset_expr, value_expr]
+    return _ir_core.create_op_call("tensor.setval", args, {}, actual_span)
