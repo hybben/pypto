@@ -1138,15 +1138,14 @@ REGISTER_BACKEND_OP(Backend910B_PTO, "system.wait_cross_core")
 //   %cond1 = arith.cmpi eq, %eid, %c1 : index
 //   scf.if %cond1 { pto.sync.set #pto.pipe<PIPE_X>, 1 }
 //   ...
-static constexpr int kMaxCrossCoreEventId = 16;
-
 static std::string MakeSetCrossCoreDynCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
   auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
   auto pipe = op->GetKwarg<int>("pipe");
+  int max_eid = op->GetKwarg<int>("max_event_id");
   std::string pipe_name = GetPipeTypeName(static_cast<ir::PipeType>(pipe));
   std::string event_id = codegen.GetExprAsCode(op->args_[0]);
 
-  for (int i = 0; i < kMaxCrossCoreEventId; ++i) {
+  for (int i = 0; i < max_eid; ++i) {
     std::string ci = codegen.GetIndexConstant(static_cast<int64_t>(i));
     std::string cond = codegen.NewTemp();
     codegen.Emit(cond + " = arith.cmpi eq, " + event_id + ", " + ci + " : index");
@@ -1160,10 +1159,11 @@ static std::string MakeSetCrossCoreDynCodegenPTO(const CallPtr& op, codegen::Cod
 static std::string MakeWaitCrossCoreDynCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
   auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
   auto pipe = op->GetKwarg<int>("pipe");
+  int max_eid = op->GetKwarg<int>("max_event_id");
   std::string pipe_name = GetPipeTypeName(static_cast<ir::PipeType>(pipe));
   std::string event_id = codegen.GetExprAsCode(op->args_[0]);
 
-  for (int i = 0; i < kMaxCrossCoreEventId; ++i) {
+  for (int i = 0; i < max_eid; ++i) {
     std::string ci = codegen.GetIndexConstant(static_cast<int64_t>(i));
     std::string cond = codegen.NewTemp();
     codegen.Emit(cond + " = arith.cmpi eq, " + event_id + ", " + ci + " : index");

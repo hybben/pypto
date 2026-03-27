@@ -118,6 +118,11 @@ class MemRefCollectorVisitor : public ir::IRVisitor {
     return memref_tile_types_;
   }
 
+  /// Returns true if the given memref was first seen inside a Cube section.
+  [[nodiscard]] bool IsCubeOnly(const ir::MemRef* m) const { return cube_memrefs_.count(m) > 0; }
+  /// Returns true if the given memref was first seen inside a Vector section.
+  [[nodiscard]] bool IsVecOnly(const ir::MemRef* m) const { return vec_memrefs_.count(m) > 0; }
+
   void VisitExpr_(const VarPtr& op) override {
     auto tile_type = As<TileType>(op->GetType());
     if (tile_type && tile_type->memref_.has_value()) {
@@ -132,10 +137,20 @@ class MemRefCollectorVisitor : public ir::IRVisitor {
     }
   }
 
+  void VisitStmt_(const ir::SectionStmtPtr& op) override {
+    auto prev = current_section_;
+    current_section_ = op->section_kind_;
+    IRVisitor::VisitStmt_(op);
+    current_section_ = prev;
+  }
+
  private:
   std::vector<MemRefPtr> memrefs_;
   std::set<const ir::MemRef*> seen_ptrs_;
   std::map<const ir::MemRef*, std::shared_ptr<const TileType>> memref_tile_types_;
+  std::set<const ir::MemRef*> cube_memrefs_;
+  std::set<const ir::MemRef*> vec_memrefs_;
+  std::optional<ir::SectionKind> current_section_;
 
   void AddMemRefIfUnique(const MemRefPtr& memref, const std::shared_ptr<const TileType>& tile_type) {
     const ir::MemRef* raw_ptr = memref.get();
@@ -143,6 +158,9 @@ class MemRefCollectorVisitor : public ir::IRVisitor {
       memrefs_.push_back(memref);
       seen_ptrs_.insert(raw_ptr);
       memref_tile_types_[raw_ptr] = tile_type;
+      // Track section membership
+      if (current_section_ == ir::SectionKind::Cube) cube_memrefs_.insert(raw_ptr);
+      if (current_section_ == ir::SectionKind::Vector) vec_memrefs_.insert(raw_ptr);
     }
   }
 };
@@ -178,6 +196,9 @@ std::string PTOCodegen::Generate(const ProgramPtr& program) {
   // inside a while body) become proper scf.while iter_args with scf.yield.
   ir::ProgramPtr ssa_program = ir::pass::ConvertToSSA()(lowered);
 
+  // Fold constants and simplify if-stmts to reduce scalar ops in generated code.
+  ir::ProgramPtr opt_program = ir::pass::ConstFoldAndSimplify()(ssa_program);
+
   stream_.str("");
   stream_.clear();
   constants_section_.str("");
@@ -191,7 +212,7 @@ std::string PTOCodegen::Generate(const ProgramPtr& program) {
   stream_ << "module {\n";
   indent_level_++;
 
-  for (const auto& [gvar, func] : ssa_program->functions_) {
+  for (const auto& [gvar, func] : opt_program->functions_) {
     if (func->func_type_ == ir::FunctionType::Orchestration) {
       throw pypto::ValueError(
           "PTO backend does not support Orchestration functions. "
@@ -246,6 +267,14 @@ void PTOCodegen::GenerateFunction(const FunctionPtr& func) {
     memref_to_mlir_[memref.get()] = tile_buf;
   }
   memref_to_tile_type_ = collector.GetMemRefTileTypes();
+  // Track section-specific memrefs for deferred emission inside sections
+  vec_only_memrefs_.clear();
+  cube_only_memrefs_.clear();
+  all_memrefs_ = collector.GetMemRefs();
+  for (const auto& memref : all_memrefs_) {
+    if (collector.IsVecOnly(memref.get())) vec_only_memrefs_.insert(memref.get());
+    if (collector.IsCubeOnly(memref.get())) cube_only_memrefs_.insert(memref.get());
+  }
 
   // Collect ordered unique dynamic dimension variables from tensor parameter shapes
   std::vector<std::string> dyn_var_names;
@@ -444,9 +473,14 @@ void PTOCodegen::EmitMakeTensorViews(const FunctionPtr& func) {
   }
 }
 
-void PTOCodegen::EmitAllocTiles(const ir::FunctionPtr& func, const std::vector<ir::MemRefPtr>& memrefs) {
+void PTOCodegen::EmitAllocTiles(const ir::FunctionPtr& func, const std::vector<ir::MemRefPtr>& memrefs,
+                                 const std::set<const ir::MemRef*>* only_these) {
   (void)func;
   for (const auto& memref : memrefs) {
+    // If only_these is specified, skip memrefs not in the set
+    if (only_these && only_these->find(memref.get()) == only_these->end()) continue;
+    // If emitting at function top (only_these is null), skip section-specific memrefs
+    if (!only_these && (vec_only_memrefs_.count(memref.get()) || cube_only_memrefs_.count(memref.get()))) continue;
     std::string tile_buf = memref_to_mlir_[memref.get()];
 
     // Collect dynamic valid_shape variable names if present
@@ -1217,6 +1251,16 @@ void PTOCodegen::VisitStmt_(const ir::SectionStmtPtr& op) {
   // Emit pto.section.{vector|cube} {
   Emit("pto.section." + section_name + " {");
   indent_level_++;
+
+  // Emit section-specific tile allocations at the top of the section
+  const std::set<const ir::MemRef*>* section_memrefs = nullptr;
+  if (op->section_kind_ == ir::SectionKind::Cube && !cube_only_memrefs_.empty())
+    section_memrefs = &cube_only_memrefs_;
+  if (op->section_kind_ == ir::SectionKind::Vector && !vec_only_memrefs_.empty())
+    section_memrefs = &vec_only_memrefs_;
+  if (section_memrefs)
+    EmitAllocTiles(nullptr, all_memrefs_, section_memrefs);
+
   VisitStmt(op->body_);
   indent_level_--;
   Emit("}");

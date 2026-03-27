@@ -119,6 +119,7 @@ set(PYPTO_SOURCES
 
     # IR - Transforms
     src/ir/transforms/ir_property.cpp
+    src/ir/transforms/const_fold_simplify_pass.cpp
     src/ir/transforms/convert_to_ssa_pass.cpp
     src/ir/transforms/lower_break_continue_pass.cpp
     src/ir/transforms/insert_sync_pass.cpp

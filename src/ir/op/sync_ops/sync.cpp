@@ -125,6 +125,7 @@ REGISTER_OP("system.set_cross_core_dyn")
     .set_op_category("SyncOp")
     .add_argument("event_id", "Dynamic event ID (ScalarType INDEX)")
     .set_attr<int>("pipe")
+    .set_attr<int>("max_event_id")
     .f_deduce_type(DeduceUnknownType);
 
 // Register system.wait_cross_core_dyn (Wait Cross Core Flag, dynamic event_id)
@@ -133,6 +134,7 @@ REGISTER_OP("system.wait_cross_core_dyn")
     .set_op_category("SyncOp")
     .add_argument("event_id", "Dynamic event ID (ScalarType INDEX)")
     .set_attr<int>("pipe")
+    .set_attr<int>("max_event_id")
     .f_deduce_type(DeduceUnknownType);
 
 // Register system.sync_all (Global Core Synchronization)

@@ -80,6 +80,10 @@ QK_READY_IDS = tuple(range(0, FIFO_SIZE))
 P_READY_IDS  = tuple(range(FIFO_SIZE, 2 * FIFO_SIZE))
 PV_READY_IDS = tuple(range(2 * FIFO_SIZE, 3 * FIFO_SIZE))
 assert 3 * FIFO_SIZE <= 16, f"Too many cross-core event IDs: need {3*FIFO_SIZE}, max 16"
+# max_event_id for codegen: only emit branches up to the highest ID used per type
+QK_MAX_EID = FIFO_SIZE        # QK IDs: [0, FIFO_SIZE)
+P_MAX_EID  = 2 * FIFO_SIZE    # P IDs:  [FIFO_SIZE, 2*FIFO_SIZE)
+PV_MAX_EID = 3 * FIFO_SIZE    # PV IDs: [2*FIFO_SIZE, 3*FIFO_SIZE)
 
 # PV buffer: 2 Q-slots × FIFO_SIZE task-slots per core
 PV_CORE_STRIDE = 2 * FIFO_SIZE * TS
@@ -176,7 +180,7 @@ def compute_qk(ctx):
     pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=event_ids_01[ctx.l0c_idx])
     ctx.l0ab_idx = 1 - ctx.l0ab_idx
     ctx.l0c_idx = 1 - ctx.l0c_idx
-    pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=QK_READY_IDS[qk_fifo_slot])
+    pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=QK_READY_IDS[qk_fifo_slot], max_event_id=QK_MAX_EID)
     return
 
 
@@ -189,7 +193,7 @@ def compute_pv(ctx):
 
     pl.system.sync_dst(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.MTE2, event_id=event_ids_23[ctx.buf_idx])
     plm.load(v_mat_buf[ctx.buf_idx], v, [sv_off, 0])
-    pl.system.wait_cross_core(pipe=pl.PipeType.M, event_id=P_READY_IDS[pv_fifo_slot])
+    pl.system.wait_cross_core(pipe=pl.PipeType.M, event_id=P_READY_IDS[pv_fifo_slot], max_event_id=P_MAX_EID)
     plm.load(p_mat_buf[ctx.buf_idx], p_buf, [pv_fifo_slot * sq_dim + ctx.sq_off, sv_off])
     pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=0)
@@ -212,7 +216,7 @@ def compute_pv(ctx):
     pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=event_ids_01[ctx.l0c_idx])
     ctx.l0ab_idx = 1 - ctx.l0ab_idx
     ctx.l0c_idx = 1 - ctx.l0c_idx
-    pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=PV_READY_IDS[pv_task_slot])
+    pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=PV_READY_IDS[pv_task_slot], max_event_id=PV_MAX_EID)
     return
 
 
@@ -227,7 +231,7 @@ def compute_p(task_id):
     """
     p_fifo_slot = task_id % FIFO_SIZE
     skv_off = task_id * TKV
-    pl.system.wait_cross_core(pipe=pl.PipeType.V, event_id=QK_READY_IDS[p_fifo_slot])
+    pl.system.wait_cross_core(pipe=pl.PipeType.V, event_id=QK_READY_IDS[p_fifo_slot], max_event_id=QK_MAX_EID)
     plm.load(qk_vec, qk_buf, [p_fifo_slot * sq_dim + sq_off + row_off, skv_off])
     pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
@@ -268,7 +272,7 @@ def compute_p(task_id):
     pl.system.sync_src(set_pipe=pl.PipeType.V, wait_pipe=pl.PipeType.MTE3, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.V, wait_pipe=pl.PipeType.MTE3, event_id=0)
     plm.store(p_buf, p_f16, [p_fifo_slot * sq_dim + sq_off + row_off, skv_off])
-    pl.system.set_cross_core(pipe=pl.PipeType.MTE3, event_id=P_READY_IDS[p_fifo_slot])
+    pl.system.set_cross_core(pipe=pl.PipeType.MTE3, event_id=P_READY_IDS[p_fifo_slot], max_event_id=P_MAX_EID)
     return
 
 
@@ -276,7 +280,7 @@ def compute_gu(task_id, q_count):
     """GU: running output update.  task_id==0 → init running_o, else accumulate."""
     q_mat_idx = q_count % 2
     pv_slot = task_id % FIFO_SIZE
-    pl.system.wait_cross_core(pipe=pl.PipeType.V, event_id=PV_READY_IDS[pv_slot])
+    pl.system.wait_cross_core(pipe=pl.PipeType.V, event_id=PV_READY_IDS[pv_slot], max_event_id=PV_MAX_EID)
     if task_id == 0:
         plm.load(running_o, pv_buf, [core_id * PV_CORE_STRIDE + q_mat_idx * FIFO_SIZE * TS + pv_slot * TS + row_off, 0])
         pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)

@@ -120,6 +120,7 @@ def set_cross_core(
     *,
     pipe: PipeType,
     event_id: int | Expr,
+    max_event_id: int = 16,
     span: Span | None = None,
 ) -> Call:
     """Set for a synchronization signal (Cross core).
@@ -127,6 +128,7 @@ def set_cross_core(
     Args:
         pipe: Pipe that sets the flag
         event_id: Event identifier (int for static, Expr for dynamic)
+        max_event_id: Upper bound of event_id range (reduces codegen branches)
         span: Optional source span for debugging (auto-captured if not provided)
 
     Returns:
@@ -134,7 +136,9 @@ def set_cross_core(
     """
     actual_span = _get_span_or_capture(span)
     if isinstance(event_id, Expr):
-        return _ir_core.create_op_call("system.set_cross_core_dyn", [event_id], {"pipe": pipe}, actual_span)
+        return _ir_core.create_op_call(
+            "system.set_cross_core_dyn", [event_id],
+            {"pipe": pipe, "max_event_id": max_event_id}, actual_span)
     kwargs = {"pipe": pipe, "event_id": event_id}
     return _ir_core.create_op_call("system.set_cross_core", [], kwargs, actual_span)
 
@@ -142,6 +146,7 @@ def wait_cross_core(
     *,
     pipe: PipeType,
     event_id: int | Expr,
+    max_event_id: int = 16,
     span: Span | None = None,
 ) -> Call:
     """Wait for a synchronization signal (Cross core).
@@ -149,6 +154,7 @@ def wait_cross_core(
     Args:
         pipe: Pipe that waits the flag
         event_id: Event identifier (int for static, Expr for dynamic)
+        max_event_id: Upper bound of event_id range (reduces codegen branches)
         span: Optional source span for debugging (auto-captured if not provided)
 
     Returns:
@@ -157,7 +163,9 @@ def wait_cross_core(
     actual_span = _get_span_or_capture(span)
 
     if isinstance(event_id, Expr):
-        return _ir_core.create_op_call("system.wait_cross_core_dyn", [event_id], {"pipe": pipe}, actual_span)
+        return _ir_core.create_op_call(
+            "system.wait_cross_core_dyn", [event_id],
+            {"pipe": pipe, "max_event_id": max_event_id}, actual_span)
     kwargs = {"pipe": pipe, "event_id": event_id}
     return _ir_core.create_op_call("system.wait_cross_core", [], kwargs, actual_span)
 

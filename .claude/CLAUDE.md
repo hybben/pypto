@@ -27,7 +27,10 @@ Please follow the following rules when working on the PyPTO project:
 export HOME=/data/g00895580
 source compile.sh
 ```
-
+- If any cpp files is changed, run the following command to re-compile.
+```bash
+pip install -e .
+```
 ## Test Commands
 ### Run a frontend testcase
 - The following case is a basic testcase, you can test the basic function by this case. Precision of this case need to be checked Ok.
@@ -38,6 +41,11 @@ For more detailed test info, look at test.md in the directory of this file(CLAUD
 ### mlir python path
 /data/g00895580/mlir/llvm-project/build-shared/tools/mlir/python_packages/mlir_core/mlir
 
+## performace test
+- Use the following command to generate performance data. And the preformance CSV file is located in the 'op_summary_xxx' file inside directory 'PROF_xxx'.
+```bash
+msprof --output=./ python3 tests/ut/frontend/flash_attention/test_fa_performance.py
+```
 ## Pipeline and sync
 - TLOAD is PIPE_MTE2, TSTORE_ACC is PIPE_FIX, TMOV_M2L and TMOV_M2B are MTE1, TMOV_M2S and TMOV_V2M are PIPE_FIX, TMOV_M2V is PIPV, TMATMUL is PIPE_M, TVEC and TVECWAIT_EVENT is PIPE_V
 - When a buffer is used within a loop, backward synchronization is needed: at the start of each iteration, execution must wait for all associated pipelines from the previous iteration to have completed before the buffer can be reused.

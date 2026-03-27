@@ -247,6 +247,16 @@ Pass RunVerifier(const std::vector<std::string>& disabled_rules = {});
 Pass LowerBreakContinue();
 
 /**
+ * @brief Create a constant folding and simplification pass
+ *
+ * Folds constant arithmetic (ConstInt + ConstInt → ConstInt), simplifies
+ * if-stmts with constant conditions or identical branches, and removes
+ * dead comparisons.  Reduces scalar instruction count significantly.
+ * Should run after ConvertToSSA.
+ */
+Pass ConstFoldAndSimplify();
+
+/**
  * @brief Create a pass that flattens nested call expressions
  */
 Pass FlattenCallExpr();
