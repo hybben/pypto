@@ -2580,11 +2580,9 @@ class ASTParser:
                 # Remove TileType from args, keep addr and size
                 args = args[1:]
 
-        ir_op_name = self._BLOCK_OP_NAME_MAP.get(op_name, op_name)
-
         # Call the appropriate block operation
-        if hasattr(ir_op.block, ir_op_name):
-            op_func = getattr(ir_op.block, ir_op_name)
+        if hasattr(ir_op.block, op_name):
+            op_func = getattr(ir_op.block, op_name)
             call_span = self.span_tracker.get_span(call)
             return op_func(*args, **kwargs, span=call_span)
 
@@ -2630,15 +2628,49 @@ class ASTParser:
         if op_name in {"dump_tensor", "dump_tile"}:
             args = [self.parse_expression(arg) for arg in call.args]
             kwargs = self._parse_op_kwargs(call)
-            ir_op_name = self._DEBUG_OP_NAME_MAP.get(op_name, op_name)
-            if hasattr(ir_op.debug, ir_op_name):
-                op_func = getattr(ir_op.debug, ir_op_name)
+            if hasattr(ir_op.debug, op_name):
+                op_func = getattr(ir_op.debug, op_name)
                 return op_func(*args, **kwargs, span=call_span)
 
             raise InvalidOperationError(
                 f"Unknown debug operation: {op_name}",
                 span=call_span,
                 hint=f"Check if '{op_name}' is a valid debug operation",
+            )
+
+        if op_name == "assert_":
+            if call.keywords:
+                raise ParserSyntaxError(
+                    "assert_ does not accept keyword arguments",
+                    span=call_span,
+                )
+            if len(call.args) < 1:
+                raise ParserSyntaxError(
+                    f"assert_ requires at least 1 argument (condition), got {len(call.args)}",
+                    span=call_span,
+                )
+
+            condition = self.parse_expression(call.args[0])
+            condition_text = self.span_tracker.get_source_text(call.args[0])
+
+            if len(call.args) == 1:
+                return ir_op.debug.assert_(condition, condition_text=condition_text, span=call_span)
+
+            format_node = call.args[1]
+            if not isinstance(format_node, ast.Constant) or not isinstance(format_node.value, str):
+                raise ParserTypeError(
+                    "assert_ message must be a string literal",
+                    span=self.span_tracker.get_span(format_node),
+                    hint='Use a literal like plm.assert_(cond, "bad state") or plm.assert_(cond, "x=%d", x)',
+                )
+
+            args = [self.parse_expression(arg) for arg in call.args[2:]]
+            return ir_op.debug.assert_(
+                condition,
+                format_node.value,
+                *args,
+                condition_text=condition_text,
+                span=call_span,
             )
 
         if op_name == "trap":
@@ -2653,7 +2685,7 @@ class ASTParser:
                     span=call_span,
                 )
 
-            return ir_op.debug.trap_(span=call_span)
+            return ir_op.debug.trap(span=call_span)
 
         if op_name == "printf":
             if call.keywords:
@@ -2676,7 +2708,7 @@ class ASTParser:
                 )
 
             args = [self.parse_expression(arg) for arg in call.args[1:]]
-            return ir_op.debug.printf_(format_node.value, *args, span=call_span)
+            return ir_op.debug.printf(format_node.value, *args, span=call_span)
 
         raise InvalidOperationError(
             f"Unknown debug operation: {op_name}",
@@ -2714,9 +2746,8 @@ class ASTParser:
         "l0c_store",    # writes L0C tile to tensor
     })
 
-    _MANUAL_AS_TENSOR_OPS: frozenset[str] = frozenset({})
-
     _MANUAL_AS_DEBUG_OPS: frozenset[str] = frozenset({
+        "assert_",
         "dump_tensor",
         "dump_tile",
         "printf",
@@ -2746,8 +2777,6 @@ class ASTParser:
             if self.sync_tracker is not None:
                 self._emit_forward_syncs_for_manual_op(op_name, call, span)
             return self._parse_block_op(op_name, call)
-        if op_name in self._MANUAL_AS_TENSOR_OPS:
-            return self._parse_tensor_op(op_name, call)
         if op_name in self._MANUAL_AS_DEBUG_OPS:
             return self._parse_debug_op(op_name, call)
 
@@ -3259,15 +3288,6 @@ class ASTParser:
     # Maps language-level tensor operation names to IR-level names.
     _TENSOR_OP_NAME_MAP: dict[str, str] = {
         "create_tensor": "create",
-    }
-
-    _BLOCK_OP_NAME_MAP: dict[str, str] = {}
-
-    _DEBUG_OP_NAME_MAP: dict[str, str] = {
-        "dump_tensor": "dump_tensor_",
-        "dump_tile": "dump_tile_",
-        "printf": "printf_",
-        "trap": "trap_",
     }
 
     # Ops that exist only in one module (no dispatch needed).

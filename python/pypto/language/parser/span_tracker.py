@@ -75,5 +75,23 @@ class SpanTracker:
             getattr(end_node, "end_col_offset", 0) + self.col_offset,
         )
 
+    def get_source_text(self, ast_node: ast.AST | None) -> str:
+        """Recover the original source text for an AST node when available."""
+        if ast_node is None:
+            return ""
+
+        source = "\n".join(self.source_lines)
+        try:
+            text = ast.get_source_segment(source, ast_node)
+        except Exception:
+            text = None
+        if text is not None:
+            return text
+
+        try:
+            return ast.unparse(ast_node)
+        except Exception:
+            return ""
+
 
 __all__ = ["SpanTracker"]

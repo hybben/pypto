@@ -246,7 +246,7 @@ def test_debug_dump_tensor_ir_returns_unknown_type():
     span = ir.Span.unknown()
     tensor_var = ir.Var("input", ir.TensorType([48, 64], DataType.FP32), span)
 
-    call = debug_op.dump_tensor_(tensor_var)
+    call = debug_op.dump_tensor(tensor_var)
 
     assert isinstance(call.type, ir.UnknownType)
 
@@ -256,7 +256,7 @@ def test_debug_dump_tile_ir_returns_unknown_type():
     span = ir.Span.unknown()
     tile_var = ir.Var("tile", ir.TileType([16, 16], DataType.FP32), span)
 
-    call = debug_op.dump_tile_(tile_var)
+    call = debug_op.dump_tile(tile_var)
 
     assert isinstance(call.type, ir.UnknownType)
 
@@ -266,14 +266,27 @@ def test_debug_printf_ir_returns_unknown_type():
     span = ir.Span.unknown()
     scalar_var = ir.Var("value", ir.ScalarType(DataType.INT32), span)
 
-    call = debug_op.printf_("value=%d", scalar_var)
+    call = debug_op.printf("value=%d", scalar_var)
 
+    assert isinstance(call.type, ir.UnknownType)
+
+
+def test_debug_assert_ir_returns_unknown_type():
+    """debug.assert IR helper should return UnknownType."""
+    span = ir.Span.unknown()
+    flag_var = ir.Var("flag", ir.ScalarType(DataType.BOOL), span)
+    value_var = ir.Var("value", ir.ScalarType(DataType.INT32), span)
+
+    call = debug_op.assert_(flag_var)
+    assert isinstance(call.type, ir.UnknownType)
+
+    call = debug_op.assert_(flag_var, "value=%d", value_var, condition_text="flag")
     assert isinstance(call.type, ir.UnknownType)
 
 
 def test_debug_trap_ir_returns_unknown_type():
     """debug.trap IR helper should return UnknownType."""
-    call = debug_op.trap_()
+    call = debug_op.trap()
 
     assert isinstance(call.type, ir.UnknownType)
 
@@ -287,25 +300,25 @@ def test_debug_printf_extended_types_return_unknown_type():
     uint_var = ir.Var("uint_value", ir.ScalarType(DataType.UINT32), span)
     fp32_var = ir.Var("fp32_value", ir.ScalarType(DataType.FP32), span)
 
-    call = debug_op.printf_("%i %d %x %u %f", int_var, bool_var, index_var, uint_var, fp32_var)
+    call = debug_op.printf("%i %d %x %u %f", int_var, bool_var, index_var, uint_var, fp32_var)
 
     assert isinstance(call.type, ir.UnknownType)
 
 
 def test_debug_printf_python_bool_returns_unknown_type():
     """debug.printf should accept direct Python bool for %d/%u/%i."""
-    call = debug_op.printf_("flag=%d", True)
+    call = debug_op.printf("flag=%d", True)
 
     assert isinstance(call.type, ir.UnknownType)
 
-    call_unsigned = debug_op.printf_("flag=%u", True)
+    call_unsigned = debug_op.printf("flag=%u", True)
 
     assert isinstance(call_unsigned.type, ir.UnknownType)
 
 
 def test_debug_printf_pure_text_returns_unknown_type():
     """debug.printf should accept pure text with zero scalar arguments."""
-    call = debug_op.printf_("hello world")
+    call = debug_op.printf("hello world")
 
     assert isinstance(call.type, ir.UnknownType)
 
@@ -422,6 +435,39 @@ def test_pto_codegen_trap_lowering():
     assert mlir_code.count("pto.trap") == 1
     assert "pto.print" not in mlir_code
     assert "pto.tprint" not in mlir_code
+
+
+def test_pto_codegen_assert_lowering():
+    """plm.assert_ should lower to scf.if with prefixed pto.print and pto.trap in the failure branch."""
+    backend.reset_for_testing()
+    backend.set_backend_type(BackendType.PTO)
+
+    @pl.program
+    class AssertProgram:
+        @pl.function
+        def assert_test(
+            self,
+            input: pl.Tensor[[16, 16], pl.INT32],
+            output: pl.Tensor[[16, 16], pl.INT32],
+            flag: pl.Scalar[pl.BOOL],
+            x: pl.Scalar[pl.INT32],
+        ):
+            plm.assert_(flag)
+            plm.assert_(x > 0, "x=%d", x)
+            tile = pl.load(input, offsets=[0, 0], shapes=[16, 16])
+            pl.store(tile, offsets=[0, 0], shapes=[16, 16], output_tensor=output)
+
+    pm = PassManager.get_strategy(OptimizationStrategy.PTOAS)
+    transformed_program = pm.run_passes(AssertProgram)
+
+    codegen_obj = PTOCodegen()
+    mlir_code = _get_mlir_code(codegen_obj.generate(transformed_program))
+
+    assert mlir_code.count("arith.xori") == 2
+    assert mlir_code.count("scf.if") == 2
+    assert "pto.print ins(\"[ASSERT] Assertion 'flag'\\n\", " in mlir_code
+    assert "pto.print ins(\"[ASSERT] Assertion 'x > 0', x=%d\\n\", " in mlir_code
+    assert mlir_code.count("pto.trap") == 2
 
 
 def test_pto_codegen_printf_accepts_common_flags_width_precision():

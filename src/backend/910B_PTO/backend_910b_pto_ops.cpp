@@ -542,30 +542,32 @@ static std::vector<PrintfSegment> ParsePrintfSegments(const std::string& format)
   return segments;
 }
 
-static std::string MakeDebugPrintfCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
-  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
-
-  std::string format = op->GetKwarg<std::string>("format");
+static void EmitPrintfSegments(codegen::PTOCodegen& codegen, const std::string& format,
+                               const std::vector<ir::ExprPtr>& args, size_t arg_offset,
+                               const std::string& indent = "") {
   auto segments = ParsePrintfSegments(format);
   if (segments.empty()) {
-    CHECK(op->args_.empty()) << "debug.printf format expects 0 scalar arguments, but got " << op->args_.size();
+    CHECK(args.size() == arg_offset) << "printf-like lowering format expects 0 scalar arguments, but got "
+                                     << (args.size() - arg_offset);
     std::string dummy = codegen.NewTemp();
-    codegen.Emit(dummy + " = arith.constant 0 : i32");
-    codegen.Emit("pto.print ins(" + EscapeMlirStringLiteral(format) + ", " + dummy + " : i32)");
-    return "";
+    codegen.Emit(indent + dummy + " = arith.constant 0 : i32");
+    codegen.Emit(indent + "pto.print ins(" + EscapeMlirStringLiteral(format) + ", " + dummy + " : i32)");
+    return;
   }
-  CHECK(segments.size() == op->args_.size()) << "debug.printf lowered segment count (" << segments.size()
-                                             << ") must match scalar arg count (" << op->args_.size() << ")";
+  CHECK(segments.size() == args.size() - arg_offset) << "printf-like lowering segment count (" << segments.size()
+                                                     << ") must match scalar arg count ("
+                                                     << (args.size() - arg_offset) << ")";
 
   for (size_t i = 0; i < segments.size(); ++i) {
-    std::string scalar = codegen.GetExprAsCode(op->args_[i]);
-    std::string scalar_type = codegen.GetExprTypeAnnotation(op->args_[i]);
+    size_t arg_index = arg_offset + i;
+    std::string scalar = codegen.GetExprAsCode(args[arg_index]);
+    std::string scalar_type = codegen.GetExprTypeAnnotation(args[arg_index]);
     INTERNAL_CHECK(!scalar_type.empty()) << "debug.printf scalar argument " << i << " is missing type annotation";
 
     if ((segments[i].conversion == 'd' || segments[i].conversion == 'i' || segments[i].conversion == 'u') &&
         scalar_type == "i1") {
       std::string casted = codegen.NewTemp();
-      codegen.Emit(casted + " = arith.extui " + scalar + " : i1 to i32");
+      codegen.Emit(indent + casted + " = arith.extui " + scalar + " : i1 to i32");
       scalar = casted;
       scalar_type = "i32";
     }
@@ -574,7 +576,7 @@ static std::string MakeDebugPrintfCodegenPTO(const CallPtr& op, codegen::Codegen
          segments[i].conversion == 'u' || segments[i].conversion == 'x') &&
         scalar_type == "index") {
       std::string casted = codegen.NewTemp();
-      codegen.Emit(casted + " = arith.index_cast " + scalar + " : index to i64");
+      codegen.Emit(indent + casted + " = arith.index_cast " + scalar + " : index to i64");
       scalar = casted;
       scalar_type = "i64";
     }
@@ -594,8 +596,8 @@ static std::string MakeDebugPrintfCodegenPTO(const CallPtr& op, codegen::Codegen
       std::string target_type = GetUnsignedPrintfTargetType(scalar_type);
       INTERNAL_CHECK(!target_type.empty())
           << "debug.printf failed to choose target signless type for unsigned scalar " << scalar_type;
-      codegen.Emit(casted + " = builtin.unrealized_conversion_cast " + scalar + " : " + scalar_type + " to " +
-                   target_type);
+      codegen.Emit(indent + casted + " = builtin.unrealized_conversion_cast " + scalar + " : " + scalar_type +
+                   " to " + target_type);
       scalar = casted;
       scalar_type = target_type;
     }
@@ -611,8 +613,55 @@ static std::string MakeDebugPrintfCodegenPTO(const CallPtr& op, codegen::Codegen
     std::ostringstream oss;
     oss << "pto.print ins(" << EscapeMlirStringLiteral(rewritten_format) << ", " << scalar << " : "
         << scalar_type << ")";
-    codegen.Emit(oss.str());
+    codegen.Emit(indent + oss.str());
   }
+}
+
+static std::string MakeDebugPrintfCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+
+  std::string format = op->GetKwarg<std::string>("format");
+  EmitPrintfSegments(codegen, format, op->args_, 0);
+  return "";
+}
+
+static std::string MakeDebugAssertCodegenPTO(const CallPtr& op, codegen::CodegenBase& codegen_base) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
+  CHECK(op->args_.size() >= 1) << "debug.assert requires at least 1 condition argument, but got "
+                               << op->args_.size();
+
+  std::string condition = codegen.GetExprAsCode(op->args_[0]);
+  std::string condition_type = codegen.GetExprTypeAnnotation(op->args_[0]);
+  if (condition_type.empty()) {
+    if (auto scalar_type = As<ir::ScalarType>(op->args_[0]->GetType());
+        scalar_type && scalar_type->dtype_ == DataType::BOOL) {
+      condition_type = "i1";
+    }
+  }
+  CHECK(condition_type == "i1") << "debug.assert requires i1 condition after frontend/IR validation, but got "
+                                << condition_type;
+
+  std::string condition_text = op->GetKwarg<std::string>("condition_text");
+  std::string format = op->GetKwarg<std::string>("format");
+
+  std::string true_value = codegen.NewTemp();
+  codegen.Emit(true_value + " = arith.constant 1 : i1");
+
+  std::string failed = codegen.NewTemp();
+  codegen.Emit(failed + " = arith.xori " + condition + ", " + true_value + " : i1");
+
+  std::string printed_message = "[ASSERT] Assertion '" + condition_text + "'";
+  if (!format.empty()) {
+    printed_message += ", " + format;
+  }
+  if (printed_message.empty() || printed_message.back() != '\n') {
+    printed_message += "\n";
+  }
+
+  codegen.Emit("scf.if " + failed + " {");
+  EmitPrintfSegments(codegen, printed_message, op->args_, 1, "  ");
+  codegen.Emit("  pto.trap");
+  codegen.Emit("}");
   return "";
 }
 
@@ -1053,6 +1102,12 @@ REGISTER_BACKEND_OP(Backend910B_PTO, "debug.printf")
     .set_pipe(ir::PipeType::S)
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
       return MakeDebugPrintfCodegenPTO(op, codegen);
+    });
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "debug.assert")
+    .set_pipe(ir::PipeType::S)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeDebugAssertCodegenPTO(op, codegen);
     });
 
 REGISTER_BACKEND_OP(Backend910B_PTO, "debug.trap")

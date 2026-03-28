@@ -317,6 +317,97 @@ class TestErrorCases:
                 plm.trap(value=1)  # type: ignore[call-arg]
                 return x
 
+    def test_assert_accepts_bool_condition_and_literal_message(self):
+        """assert_ should parse in cond-only, plain-text, and formatted modes."""
+
+        @pl.function(type=pl.FunctionType.Orchestration)
+        def assert_ok(flag: pl.Scalar[pl.BOOL]) -> pl.Scalar[pl.BOOL]:
+            plm.assert_(flag)
+            plm.assert_(flag, "bad state")
+            plm.assert_(True, "forced fail")
+            return flag
+
+        assert assert_ok is not None
+
+        @pl.function(type=pl.FunctionType.Orchestration)
+        def assert_printf_ok(x: pl.Scalar[pl.INT32], flag: pl.Scalar[pl.BOOL]) -> pl.Scalar[pl.INT32]:
+            plm.assert_(x > 0, "x=%d", x)
+            plm.assert_(flag, "x=%d", x)
+            return x
+
+        assert assert_printf_ok is not None
+
+    def test_assert_rejects_keyword_arguments(self):
+        """assert_ should reject keyword arguments."""
+
+        with pytest.raises(ParserSyntaxError, match="assert_ does not accept keyword arguments"):
+
+            @pl.function(type=pl.FunctionType.Orchestration)
+            def assert_with_kwarg(flag: pl.Scalar[pl.BOOL]) -> pl.Scalar[pl.BOOL]:
+                plm.assert_(condition=flag, message="bad state")  # type: ignore[call-arg]
+                return flag
+
+    def test_assert_rejects_wrong_argument_count(self):
+        """assert_ should reject missing condition and mismatched printf-style args."""
+
+        with pytest.raises(ParserSyntaxError, match="assert_ requires at least 1 argument"):
+
+            @pl.function(type=pl.FunctionType.Orchestration)
+            def assert_missing_condition(flag: pl.Scalar[pl.BOOL]) -> pl.Scalar[pl.BOOL]:
+                plm.assert_()  # type: ignore[call-arg]
+                return flag
+
+        with pytest.raises(ParserSyntaxError, match="format expects 0 scalar arguments, but got 1"):
+
+            @pl.function(type=pl.FunctionType.Orchestration)
+            def assert_extra_arg(flag: pl.Scalar[pl.BOOL], x: pl.Scalar[pl.INT32]) -> pl.Scalar[pl.BOOL]:
+                plm.assert_(flag, "bad state", x)
+                return flag
+
+    def test_assert_rejects_non_literal_message(self):
+        """assert_ should require a string literal message."""
+
+        with pytest.raises(ParserTypeError, match="message must be a string literal"):
+
+            @pl.function(type=pl.FunctionType.Orchestration)
+            def assert_nonliteral_message(
+                flag: pl.Scalar[pl.BOOL], msg: pl.Scalar[pl.INT32]
+            ) -> pl.Scalar[pl.BOOL]:
+                plm.assert_(flag, msg)  # type: ignore[arg-type]
+                return flag
+
+    def test_assert_rejects_non_bool_condition(self):
+        """assert_ should require a bool scalar condition."""
+
+        with pytest.raises(ParserSyntaxError, match="requires a scalar bool condition"):
+
+            @pl.function(type=pl.FunctionType.Orchestration)
+            def assert_nonbool_condition(x: pl.Scalar[pl.INT32]) -> pl.Scalar[pl.INT32]:
+                plm.assert_(x, "bad state")
+                return x
+
+    def test_assert_rejects_printf_mismatched_argument_count(self):
+        """assert_ should reuse printf argument-count validation."""
+
+        with pytest.raises(ParserSyntaxError, match="format expects 2 scalar arguments, but got 1"):
+
+            @pl.function(type=pl.FunctionType.Orchestration)
+            def assert_printf_mismatch(flag: pl.Scalar[pl.BOOL], x: pl.Scalar[pl.INT32]) -> pl.Scalar[pl.INT32]:
+                plm.assert_(flag, "x=%d y=%d", x)
+                return x
+
+    def test_assert_rejects_printf_non_scalar_argument(self):
+        """assert_ should reuse printf scalar-argument validation."""
+
+        with pytest.raises(ParserSyntaxError, match="requires ScalarType input"):
+
+            @pl.function
+            def assert_non_scalar_message_arg(
+                flag: pl.Scalar[pl.BOOL], x: pl.Tensor[[16, 16], pl.INT32]
+            ) -> pl.Tensor[[16, 16], pl.INT32]:
+                plm.assert_(flag, "x=%d", x)  # type: ignore[arg-type]
+                return x
+
     def test_printf_accepts_bool_for_decimal_formats(self):
         """printf should accept bool scalars for %d/%i/%u."""
 

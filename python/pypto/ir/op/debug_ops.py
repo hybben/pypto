@@ -113,7 +113,76 @@ def _scan_printf_format(format_str: str) -> list[str]:
     return specs
 
 
-def dump_tensor_(
+def _normalize_printf_args(
+    args: Sequence[int | float | Expr | bool], actual_span: Span
+) -> tuple[list[Expr], list[bool]]:
+    normalized_args: list[Expr] = []
+    raw_bool_args: list[bool] = []
+    for arg in args:
+        if isinstance(arg, Expr):
+            normalized_args.append(arg)
+            raw_bool_args.append(False)
+        elif isinstance(arg, bool):
+            normalized_args.append(ConstBool(arg, actual_span))
+            raw_bool_args.append(True)
+        else:
+            normalized_args.append(
+                _normalize_expr(arg, actual_span, int_dtype=DataType.INT64, float_dtype=DataType.FP32)
+            )
+            raw_bool_args.append(False)
+
+    return normalized_args, raw_bool_args
+
+
+def _validate_printf_arguments(
+    format_str: str, normalized_args: Sequence[Expr], raw_bool_args: Sequence[bool], *, op_name: str
+) -> None:
+    specs = _scan_printf_format(format_str)
+    if len(specs) != len(normalized_args):
+        raise ValueError(
+            f"{op_name} format expects {len(specs)} scalar arguments, but got {len(normalized_args)}"
+        )
+
+    for idx, (spec, arg, is_raw_bool) in enumerate(zip(specs, normalized_args, raw_bool_args, strict=True)):
+        scalar_type = arg.type
+        if not isinstance(scalar_type, ScalarType):
+            raise TypeError(
+                f"debug.{op_name} argument {idx} requires ScalarType input, but got {type(scalar_type).__name__}"
+            )
+
+        conversion = spec[-1]
+        if conversion in {"d", "i"} and not (
+            _is_signed_integer_dtype(scalar_type.dtype)
+            or _is_bool_dtype(scalar_type.dtype)
+            or _is_index_dtype(scalar_type.dtype)
+        ):
+            raise TypeError(
+                f"debug.{op_name} conversion '{spec}' requires signed integer, bool, or index scalar, but got {scalar_type.dtype}"
+            )
+        if conversion == "u" and not (
+            _is_unsigned_integer_dtype(scalar_type.dtype)
+            or _is_bool_dtype(scalar_type.dtype)
+            or _is_index_dtype(scalar_type.dtype)
+            or is_raw_bool
+        ):
+            raise TypeError(
+                f"debug.{op_name} conversion '{spec}' requires unsigned integer, bool, or index scalar, but got {scalar_type.dtype}"
+            )
+        if conversion == "x" and not (
+            _is_unsigned_integer_dtype(scalar_type.dtype) or _is_index_dtype(scalar_type.dtype)
+        ):
+            raise TypeError(
+                f"debug.{op_name} conversion '{spec}' requires unsigned integer or index scalar, but got {scalar_type.dtype}"
+            )
+        if conversion == "x" and is_raw_bool:
+            raise TypeError(f"debug.{op_name} conversion '{spec}' does not support bool scalars")
+        if conversion in _FLOAT_CONVERSIONS and scalar_type.dtype != DataType.FP32:
+            raise TypeError(
+                f"debug.{op_name} conversion '{spec}' requires FP32 scalar, but got {scalar_type.dtype}"
+            )
+
+
+def dump_tensor(
     tensor: Expr,
     offsets: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
     shapes: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
@@ -178,7 +247,7 @@ def dump_tensor_(
     )
 
 
-def dump_tile_(
+def dump_tile(
     tile: Expr,
     offsets: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
     shapes: Sequence[int | Expr] | _ir_core.MakeTuple | None = None,
@@ -227,79 +296,70 @@ def dump_tile_(
     )
 
 
-def printf_(format_str: str, *args: int | float | Expr, span: Span | None = None) -> Call:
+def printf(format_str: str, *args: int | float | Expr, span: Span | None = None) -> Call:
     """Print scalar values using a compile-time format string."""
     actual_span = _get_span_or_capture(span)
     if not isinstance(format_str, str):
         raise TypeError(f"debug.printf requires string format literal, but got {type(format_str).__name__}")
 
-    normalized_args = []
-    raw_bool_args: list[bool] = []
-    for arg in args:
-        if isinstance(arg, Expr):
-            normalized_args.append(arg)
-            raw_bool_args.append(False)
-        elif isinstance(arg, bool):
-            normalized_args.append(ConstBool(arg, actual_span))
-            raw_bool_args.append(True)
-        else:
-            normalized_args.append(
-                _normalize_expr(arg, actual_span, int_dtype=DataType.INT64, float_dtype=DataType.FP32)
-            )
-            raw_bool_args.append(False)
-
-    specs = _scan_printf_format(format_str)
-    if len(specs) != len(normalized_args):
-        raise ValueError(
-            f"printf format expects {len(specs)} scalar arguments, but got {len(normalized_args)}"
-        )
-
-    for idx, (spec, arg, is_raw_bool) in enumerate(zip(specs, normalized_args, raw_bool_args, strict=True)):
-        scalar_type = arg.type
-        if not isinstance(scalar_type, ScalarType):
-            raise TypeError(
-                f"debug.printf argument {idx} requires ScalarType input, but got {type(scalar_type).__name__}"
-            )
-
-        conversion = spec[-1]
-        if conversion in {"d", "i"} and not (
-            _is_signed_integer_dtype(scalar_type.dtype)
-            or _is_bool_dtype(scalar_type.dtype)
-            or _is_index_dtype(scalar_type.dtype)
-        ):
-            raise TypeError(
-                f"debug.printf conversion '{spec}' requires signed integer, bool, or index scalar, but got {scalar_type.dtype}"
-            )
-        if conversion == "u" and not (
-            _is_unsigned_integer_dtype(scalar_type.dtype)
-            or _is_bool_dtype(scalar_type.dtype)
-            or _is_index_dtype(scalar_type.dtype)
-            or is_raw_bool
-        ):
-            raise TypeError(
-                f"debug.printf conversion '{spec}' requires unsigned integer, bool, or index scalar, but got {scalar_type.dtype}"
-            )
-        if conversion == "x" and not (
-            _is_unsigned_integer_dtype(scalar_type.dtype) or _is_index_dtype(scalar_type.dtype)
-        ):
-            raise TypeError(
-                f"debug.printf conversion '{spec}' requires unsigned integer or index scalar, but got {scalar_type.dtype}"
-            )
-        if conversion == "x" and is_raw_bool:
-            raise TypeError(f"debug.printf conversion '{spec}' does not support bool scalars")
-        if conversion in _FLOAT_CONVERSIONS and scalar_type.dtype != DataType.FP32:
-            raise TypeError(
-                f"debug.printf conversion '{spec}' requires FP32 scalar, but got {scalar_type.dtype}"
-            )
+    normalized_args, raw_bool_args = _normalize_printf_args(args, actual_span)
+    _validate_printf_arguments(format_str, normalized_args, raw_bool_args, op_name="printf")
 
     kwargs: dict[str, Any] = {"format": format_str}
     return _ir_core.create_op_call("debug.printf", normalized_args, kwargs, actual_span)
 
 
-def trap_(*, span: Span | None = None) -> Call:
+def assert_(
+    condition: bool | Expr,
+    format_str: str | None = None,
+    *args: int | float | Expr | bool,
+    condition_text: str | None = None,
+    span: Span | None = None,
+) -> Call:
+    """Abort execution when a scalar boolean condition is false."""
+    actual_span = _get_span_or_capture(span)
+    if isinstance(condition, Expr):
+        condition_expr = condition
+    elif isinstance(condition, bool):
+        condition_expr = ConstBool(condition, actual_span)
+    else:
+        raise TypeError(
+            "debug.assert requires a scalar bool condition, "
+            f"but got {type(condition).__name__}"
+        )
+
+    condition_type = condition_expr.type
+    if not isinstance(condition_type, ScalarType) or condition_type.dtype != DataType.BOOL:
+        raise TypeError(
+            "debug.assert requires a scalar bool condition, "
+            f"but got {type(condition_type).__name__}({getattr(condition_type, 'dtype', condition_type)})"
+        )
+
+    if condition_text is None:
+        condition_text = "condition"
+    if not isinstance(condition_text, str):
+        raise TypeError(
+            f"debug.assert requires string condition_text metadata, but got {type(condition_text).__name__}"
+        )
+
+    normalized_args: list[Expr] = []
+    if format_str is None:
+        format_value = ""
+    else:
+        if not isinstance(format_str, str):
+            raise TypeError(f"debug.assert requires string literal format, but got {type(format_str).__name__}")
+        normalized_args, raw_bool_args = _normalize_printf_args(args, actual_span)
+        _validate_printf_arguments(format_str, normalized_args, raw_bool_args, op_name="assert")
+        format_value = format_str
+
+    kwargs: dict[str, Any] = {"condition_text": condition_text, "format": format_value}
+    return _ir_core.create_op_call("debug.assert", [condition_expr, *normalized_args], kwargs, actual_span)
+
+
+def trap(*, span: Span | None = None) -> Call:
     """Abort execution by inserting a trap."""
     actual_span = _get_span_or_capture(span)
     return _ir_core.create_op_call("debug.trap", [], {}, actual_span)
 
 
-__all__ = ["dump_tensor_", "dump_tile_", "printf_", "trap_"]
+__all__ = ["assert_", "dump_tensor", "dump_tile", "printf", "trap"]

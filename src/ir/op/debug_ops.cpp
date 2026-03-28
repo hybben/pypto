@@ -280,6 +280,70 @@ TypePtr DeduceDebugPrintfType(const std::vector<ExprPtr>& args,
   return GetUnknownType();
 }
 
+TypePtr DeduceDebugAssertType(const std::vector<ExprPtr>& args,
+                              const std::vector<std::pair<std::string, std::any>>& kwargs) {
+  CHECK(args.size() >= 1) << "debug.assert requires at least 1 argument (condition), but got "
+                          << args.size();
+
+  bool found_condition_text = false;
+  bool found_format = false;
+  std::string condition_text;
+  std::string format;
+  for (const auto& [key, value] : kwargs) {
+    if (key == "condition_text") {
+      condition_text = AnyCast<std::string>(value, "kwarg key: condition_text");
+      found_condition_text = true;
+    } else if (key == "format") {
+      format = AnyCast<std::string>(value, "kwarg key: format");
+      found_format = true;
+    }
+  }
+  CHECK(found_condition_text) << "debug.assert requires 'condition_text' kwarg";
+  CHECK(found_format) << "debug.assert requires 'format' kwarg";
+  CHECK(!condition_text.empty()) << "debug.assert requires non-empty condition_text";
+
+  auto scalar_type = As<ScalarType>(args[0]->GetType());
+  CHECK(scalar_type) << "debug.assert requires condition to be ScalarType, but got "
+                     << args[0]->GetType()->TypeName();
+  CHECK(scalar_type->dtype_ == DataType::BOOL)
+      << "debug.assert requires bool scalar condition, but got " << scalar_type->dtype_.ToString();
+
+  auto conversions = ParsePrintfConversions(format);
+  CHECK(conversions.size() == args.size() - 1) << "debug.assert format expects " << conversions.size()
+                                               << " scalar arguments, but got " << (args.size() - 1);
+
+  for (size_t i = 1; i < args.size(); ++i) {
+    auto printf_arg = As<ScalarType>(args[i]->GetType());
+    CHECK(printf_arg) << "debug.assert argument " << (i - 1) << " must be ScalarType, but got "
+                      << args[i]->GetType()->TypeName();
+
+    const DataType& dtype = printf_arg->dtype_;
+    char conversion = conversions[i - 1];
+    if (conversion == 'f') {
+      CHECK(dtype == DataType::FP32)
+          << "debug.assert conversion '%f' requires FP32 scalar, but got "
+          << dtype.ToString();
+    } else if (conversion == 'x') {
+      CHECK(IsPrintfUnsignedIntegerType(dtype) || IsPrintfIndexType(dtype))
+          << "debug.assert conversion '%" << conversion
+          << "' requires unsigned integer or index scalar, but got "
+          << dtype.ToString();
+    } else if (conversion == 'u') {
+      CHECK(IsPrintfUnsignedIntegerType(dtype) || IsPrintfBoolType(dtype) || IsPrintfIndexType(dtype))
+          << "debug.assert conversion '%" << conversion
+          << "' requires unsigned integer, bool, or index scalar, but got "
+          << dtype.ToString();
+    } else {
+      CHECK(IsPrintfSignedIntegerType(dtype) || IsPrintfBoolType(dtype) || IsPrintfIndexType(dtype))
+          << "debug.assert conversion '%" << conversion
+          << "' requires signed integer, bool, or index scalar, but got "
+          << dtype.ToString();
+    }
+  }
+
+  return GetUnknownType();
+}
+
 }  // namespace
 
 REGISTER_OP("debug.dump_tensor")
@@ -312,6 +376,18 @@ REGISTER_OP("debug.printf")
     .f_deduce_type([](const std::vector<ExprPtr>& args,
                       const std::vector<std::pair<std::string, std::any>>& kwargs) {
       return DeduceDebugPrintfType(args, kwargs);
+    });
+
+REGISTER_OP("debug.assert")
+    .set_op_category("DebugOp")
+    .set_description("Print an assertion failure message and abort execution when condition is false")
+    .add_argument("condition", "Scalar boolean condition")
+    .add_argument("scalars", "Optional scalar arguments consumed by assertion format conversions (variadic)")
+    .set_attr<std::string>("condition_text")
+    .set_attr<std::string>("format")
+    .f_deduce_type([](const std::vector<ExprPtr>& args,
+                      const std::vector<std::pair<std::string, std::any>>& kwargs) {
+      return DeduceDebugAssertType(args, kwargs);
     });
 
 REGISTER_OP("debug.trap")

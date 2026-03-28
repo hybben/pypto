@@ -54,7 +54,7 @@ def trap_kernel(
 @fe.jit()
 def test_trap() -> None:
     print("TRAP_TEST_BEFORE_COMPILE", flush=True)
-    compiled_lib = fe.compile(trap_kernel, arch="a3", enable_print_debug = True)
+    compiled_lib = fe.compile(trap_kernel, arch="a3")
     print("TRAP_TEST_AFTER_COMPILE", compiled_lib.lib_path, flush=True)
 
     device = "npu:0"
