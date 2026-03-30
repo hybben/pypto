@@ -353,6 +353,9 @@ class CCECodegen : public CodegenBase {
   // Tile array deduplication: maps "tile0,tile1" → shared Tile array name
   std::map<std::string, std::string> tile_array_decls_;
   int tile_array_counter_ = 0;  ///< Counter for unique Tile array names
+
+  // Tile type dedup: maps tile_type_str → alias name already emitted
+  std::map<std::string, std::string> emitted_tile_types_;
 };
 
 }  // namespace codegen

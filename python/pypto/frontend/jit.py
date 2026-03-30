@@ -673,7 +673,19 @@ def compile(prog, clean_up=False, timeout=20, arch: str = "a3", enable_print_deb
         f"-I{ASCEND_HOME_PATH}/include/experiment/runtime",
         f"-I{ASCEND_HOME_PATH}/include/experiment/msprof",
     ]
-
+    llvm_args = [
+        "-mllvm", "-cce-aicore-stack-size=0x8000",
+        "-mllvm", "-cce-aicore-function-stack-size=0x8000",
+        "-mllvm", "-cce-aicore-record-overflow=false",
+        "-mllvm", "-cce-aicore-addr-transform",
+        "-mllvm", "-cce-aicore-dcci-insert-for-scalar=false",
+        "--cce-auto-sync=off",
+        "-O3",
+        "--cce-disable-kernel-global-attr-check",
+        "-Wno-parentheses-equality",
+        "-Wno-unused-command-line-argument",
+        "-Werror",
+    ]
     resolved_enable_print_debug = needs_print_debug if enable_print_debug is None else enable_print_debug
     flags = _build_bisheng_flags(
         PTO_LIB_PATH,
@@ -684,7 +696,7 @@ def compile(prog, clean_up=False, timeout=20, arch: str = "a3", enable_print_deb
     )
     flags.extend(runtime_includes)
     result = subprocess.run(
-        ["bisheng", *flags, final_kernel, "-L", LD_LIB_PATH, "-lruntime", "-lprofapi", "-o", lib_path],
+        ["bisheng", *flags, *llvm_args, final_kernel, "-L", LD_LIB_PATH, "-lruntime", "-lprofapi", "-o", lib_path],
         check=False, timeout=timeout, capture_output=True
     )
     if result.returncode != 0:

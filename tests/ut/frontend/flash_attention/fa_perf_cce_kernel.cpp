@@ -4,619 +4,388 @@
 
 using namespace pto;
 
-__global__ AICORE void fa_perf_kernel(__gm__ half* q_0, __gm__ half* k_0, __gm__ half* v_0, __gm__ half* o_0, __gm__ float* qk_buf_0, __gm__ half* p_buf_0, __gm__ float* pv_buf_0, int32_t Sq, int32_t D, int32_t Skv, int32_t SqFifo, __gm__ int64_t* ffts_addr)
+__global__ AICORE void fa_perf_kernel(__gm__ half* q, __gm__ half* k, __gm__ half* v, __gm__ half* o, __gm__ float* qk_buf, __gm__ half* p_buf, __gm__ float* pv_buf, int32_t Sq, int32_t D, int32_t Skv, int32_t SqFifo, __gm__ int64_t* ffts_addr)
 {
-    int32_t _local_Sq = Sq;
-    int32_t _local_D = D;
-    int32_t _local_Skv = Skv;
-    int32_t _local_SqFifo = SqFifo;
+    const int32_t sq_dim = Sq;
+    const int32_t skv_dim = Skv;
     set_ffts_base_addr((unsigned long)ffts_addr);
 
-    using q_0GlobalShapeDim5 = Shape<1, 1, 1, 64, 128>;
-    using q_0GlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
-    using q_0GlobalType = GlobalTensor<half, q_0GlobalShapeDim5, q_0GlobalStrideDim5>;
-    q_0GlobalType q_0Global(q_0);
+    using qGlobalShapeDim5 = Shape<1, 1, 1, 64, 128>;
+    using qGlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
+    using qGlobalType = GlobalTensor<half, qGlobalShapeDim5, qGlobalStrideDim5>;
+    qGlobalType qGlobal(q);
 
-    using k_0GlobalShapeDim5 = Shape<1, 1, 1, 128, 128>;
-    using k_0GlobalStrideDim5 = Stride<128, 128, 128, 1, 128>;
-    using k_0GlobalType = GlobalTensor<half, k_0GlobalShapeDim5, k_0GlobalStrideDim5, Layout::DN>;
-    k_0GlobalType k_0Global(k_0);
+    using kGlobalShapeDim5 = Shape<1, 1, 1, 128, 128>;
+    using kGlobalStrideDim5 = Stride<128, 128, 128, 1, 128>;
+    using kGlobalType = GlobalTensor<half, kGlobalShapeDim5, kGlobalStrideDim5, Layout::DN>;
+    kGlobalType kGlobal(k);
 
-    using v_0GlobalShapeDim5 = Shape<1, 1, 1, 128, 128>;
-    using v_0GlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
-    using v_0GlobalType = GlobalTensor<half, v_0GlobalShapeDim5, v_0GlobalStrideDim5>;
-    v_0GlobalType v_0Global(v_0);
+    using vGlobalShapeDim5 = Shape<1, 1, 1, 128, 128>;
+    using vGlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
+    using vGlobalType = GlobalTensor<half, vGlobalShapeDim5, vGlobalStrideDim5>;
+    vGlobalType vGlobal(v);
 
-    using o_0GlobalShapeDim5 = Shape<1, 1, 1, 64, 128>;
-    using o_0GlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
-    using o_0GlobalType = GlobalTensor<half, o_0GlobalShapeDim5, o_0GlobalStrideDim5>;
-    o_0GlobalType o_0Global(o_0);
+    using oGlobalShapeDim5 = Shape<1, 1, 1, 64, 128>;
+    using oGlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
+    using oGlobalType = GlobalTensor<half, oGlobalShapeDim5, oGlobalStrideDim5>;
+    oGlobalType oGlobal(o);
 
-    using qk_buf_0GlobalShapeDim5 = Shape<1, 1, 1, 64, 128>;
-    using qk_buf_0GlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
-    using qk_buf_0GlobalType = GlobalTensor<float, qk_buf_0GlobalShapeDim5, qk_buf_0GlobalStrideDim5>;
-    qk_buf_0GlobalType qk_buf_0Global(qk_buf_0);
+    using qk_bufGlobalShapeDim5 = Shape<1, 1, 1, 64, 128>;
+    using qk_bufGlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
+    using qk_bufGlobalType = GlobalTensor<float, qk_bufGlobalShapeDim5, qk_bufGlobalStrideDim5>;
+    qk_bufGlobalType qk_bufGlobal(qk_buf);
 
-    using p_buf_0GlobalShapeDim5 = Shape<1, 1, 1, 64, 128>;
-    using p_buf_0GlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
-    using p_buf_0GlobalType = GlobalTensor<half, p_buf_0GlobalShapeDim5, p_buf_0GlobalStrideDim5>;
-    p_buf_0GlobalType p_buf_0Global(p_buf_0);
+    using p_bufGlobalShapeDim5 = Shape<1, 1, 1, 64, 128>;
+    using p_bufGlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
+    using p_bufGlobalType = GlobalTensor<half, p_bufGlobalShapeDim5, p_bufGlobalStrideDim5>;
+    p_bufGlobalType p_bufGlobal(p_buf);
 
-    using pv_buf_0GlobalShapeDim5 = Shape<1, 1, 1, 64, 128>;
-    using pv_buf_0GlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
-    using pv_buf_0GlobalType = GlobalTensor<float, pv_buf_0GlobalShapeDim5, pv_buf_0GlobalStrideDim5>;
-    pv_buf_0GlobalType pv_buf_0Global(pv_buf_0);
+    using pv_bufGlobalShapeDim5 = Shape<1, 1, 1, 64, 128>;
+    using pv_bufGlobalStrideDim5 = Stride<1, 1, 1, 128, 1>;
+    using pv_bufGlobalType = GlobalTensor<float, pv_bufGlobalShapeDim5, pv_bufGlobalStrideDim5>;
+    pv_bufGlobalType pv_bufGlobal(pv_buf);
+
+    const int32_t sq_tiles = ((sq_dim + 127) >> 7);
+    const int32_t skv_tiles = ((skv_dim + 127) >> 7);
+    const auto num_cores = (int32_t)(get_block_num());
+    const auto core_id = (int32_t)(get_block_idx());
 
     #if defined(__DAV_CUBE__)
-    // Tile declarations (Cube)
-    using q_mat_buf_0_0Type = Tile<TileType::Mat, half, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512>;
-    q_mat_buf_0_0Type q_mat_buf_0_0(64, 128);
-    TASSIGN(q_mat_buf_0_0, 0x0);
-    using q_mat_buf_0_1Type = Tile<TileType::Mat, half, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512>;
-    q_mat_buf_0_1Type q_mat_buf_0_1(64, 128);
-    TASSIGN(q_mat_buf_0_1, 0x4000);
-    using k_mat_buf_0_0Type = Tile<TileType::Mat, half, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512>;
-    k_mat_buf_0_0Type k_mat_buf_0_0(128, 128);
-    TASSIGN(k_mat_buf_0_0, 0x8000);
-    using k_mat_buf_0_1Type = Tile<TileType::Mat, half, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512>;
-    k_mat_buf_0_1Type k_mat_buf_0_1(128, 128);
-    TASSIGN(k_mat_buf_0_1, 0x10000);
-    using p_mat_buf_0_0Type = Tile<TileType::Mat, half, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512>;
-    p_mat_buf_0_0Type p_mat_buf_0_0(64, 128);
-    TASSIGN(p_mat_buf_0_0, 0x18000);
-    using p_mat_buf_0_1Type = Tile<TileType::Mat, half, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512>;
-    p_mat_buf_0_1Type p_mat_buf_0_1(64, 128);
-    TASSIGN(p_mat_buf_0_1, 0x1c000);
-    using v_mat_buf_0_0Type = Tile<TileType::Mat, half, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512>;
-    v_mat_buf_0_0Type v_mat_buf_0_0(128, 128);
-    TASSIGN(v_mat_buf_0_0, 0x20000);
-    using v_mat_buf_0_1Type = Tile<TileType::Mat, half, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512>;
-    v_mat_buf_0_1Type v_mat_buf_0_1(128, 128);
-    TASSIGN(v_mat_buf_0_1, 0x28000);
-    using left_buf_0_0Type = Tile<TileType::Left, half, 64, 128, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512>;
-    left_buf_0_0Type left_buf_0_0(64, 128);
-    TASSIGN(left_buf_0_0, 0x0);
-    using left_buf_0_1Type = Tile<TileType::Left, half, 64, 128, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512>;
-    left_buf_0_1Type left_buf_0_1(64, 128);
-    TASSIGN(left_buf_0_1, 0x4000);
-    using right_buf_0_0Type = Tile<TileType::Right, half, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512>;
-    right_buf_0_0Type right_buf_0_0(128, 128);
-    TASSIGN(right_buf_0_0, 0x0);
-    using right_buf_0_1Type = Tile<TileType::Right, half, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512>;
-    right_buf_0_1Type right_buf_0_1(128, 128);
-    TASSIGN(right_buf_0_1, 0x8000);
-    using acc_buf_0_0Type = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024>;
-    acc_buf_0_0Type acc_buf_0_0(64, 128);
-    TASSIGN(acc_buf_0_0, 0x0);
-    using acc_buf_0_1Type = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024>;
-    acc_buf_0_1Type acc_buf_0_1(64, 128);
-    TASSIGN(acc_buf_0_1, 0x8000);
-    #endif  // __DAV_CUBE__
+    using q_mat_buf_Type = Tile<TileType::Mat, half, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512>;
+    q_mat_buf_Type q_mat_buf_0(64, 128); TASSIGN(q_mat_buf_0, 0x0);
+    q_mat_buf_Type q_mat_buf_1(64, 128); TASSIGN(q_mat_buf_1, 0x4000);
+    using k_mat_buf_Type = Tile<TileType::Mat, half, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512>;
+    k_mat_buf_Type k_mat_buf_0(128, 128); TASSIGN(k_mat_buf_0, 0x8000);
+    k_mat_buf_Type k_mat_buf_1(128, 128); TASSIGN(k_mat_buf_1, 0x10000);
+    using p_mat_buf_Type = Tile<TileType::Mat, half, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512>;
+    p_mat_buf_Type p_mat_buf_0(64, 128); TASSIGN(p_mat_buf_0, 0x18000);
+    p_mat_buf_Type p_mat_buf_1(64, 128); TASSIGN(p_mat_buf_1, 0x1c000);
+    using v_mat_buf_Type = Tile<TileType::Mat, half, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512>;
+    v_mat_buf_Type v_mat_buf_0(128, 128); TASSIGN(v_mat_buf_0, 0x20000);
+    v_mat_buf_Type v_mat_buf_1(128, 128); TASSIGN(v_mat_buf_1, 0x28000);
+    using left_buf_Type = Tile<TileType::Left, half, 64, 128, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512>;
+    left_buf_Type left_buf_0(64, 128); TASSIGN(left_buf_0, 0x0);
+    left_buf_Type left_buf_1(64, 128); TASSIGN(left_buf_1, 0x4000);
+    using right_buf_Type = Tile<TileType::Right, half, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512>;
+    right_buf_Type right_buf_0(128, 128); TASSIGN(right_buf_0, 0x0);
+    right_buf_Type right_buf_1(128, 128); TASSIGN(right_buf_1, 0x8000);
+    using acc_buf_Type = Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024>;
+    acc_buf_Type acc_buf_0(64, 128); TASSIGN(acc_buf_0, 0x0);
+    acc_buf_Type acc_buf_1(64, 128); TASSIGN(acc_buf_1, 0x8000);
+    #endif
 
     #if defined(__DAV_VEC__)
-    // Tile declarations (Vector)
-    using qk_vec_0Type = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    qk_vec_0Type qk_vec_0(64, 128);
-    TASSIGN(qk_vec_0, 0x0);
-    using tmp_vec_0Type = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    tmp_vec_0Type tmp_vec_0(64, 128);
-    TASSIGN(tmp_vec_0, 0x8000);
-    using p_f16_0Type = Tile<TileType::Vec, half, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    p_f16_0Type p_f16_0(64, 128);
-    TASSIGN(p_f16_0, 0x10000);
-    using reduce_dst_0Type = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512>;
-    reduce_dst_0Type reduce_dst_0(64, 1);
-    TASSIGN(reduce_dst_0, 0x14000);
-    using reduce_dst_rm_0Type = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    reduce_dst_rm_0Type reduce_dst_rm_0(1, 64);
-    TASSIGN(reduce_dst_rm_0, 0x14000);
-    using global_max_buf_0_0Type = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512>;
-    global_max_buf_0_0Type global_max_buf_0_0(64, 1);
-    TASSIGN(global_max_buf_0_0, 0x14100);
-    using global_max_buf_0_1Type = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512>;
-    global_max_buf_0_1Type global_max_buf_0_1(64, 1);
-    TASSIGN(global_max_buf_0_1, 0x14200);
-    using global_max_rm_buf_0_0Type = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    global_max_rm_buf_0_0Type global_max_rm_buf_0_0(1, 64);
-    TASSIGN(global_max_rm_buf_0_0, 0x14100);
-    using global_max_rm_buf_0_1Type = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    global_max_rm_buf_0_1Type global_max_rm_buf_0_1(1, 64);
-    TASSIGN(global_max_rm_buf_0_1, 0x14200);
-    using global_sum_buf_0_0Type = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512>;
-    global_sum_buf_0_0Type global_sum_buf_0_0(64, 1);
-    TASSIGN(global_sum_buf_0_0, 0x14300);
-    using global_sum_buf_0_1Type = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512>;
-    global_sum_buf_0_1Type global_sum_buf_0_1(64, 1);
-    TASSIGN(global_sum_buf_0_1, 0x14400);
-    using global_sum_rm_buf_0_0Type = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    global_sum_rm_buf_0_0Type global_sum_rm_buf_0_0(1, 64);
-    TASSIGN(global_sum_rm_buf_0_0, 0x14300);
-    using global_sum_rm_buf_0_1Type = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    global_sum_rm_buf_0_1Type global_sum_rm_buf_0_1(1, 64);
-    TASSIGN(global_sum_rm_buf_0_1, 0x14400);
-    using exp_corr_fifo_0_0Type = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512>;
-    exp_corr_fifo_0_0Type exp_corr_fifo_0_0(64, 1);
-    TASSIGN(exp_corr_fifo_0_0, 0x14500);
-    using exp_corr_fifo_0_1Type = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512>;
-    exp_corr_fifo_0_1Type exp_corr_fifo_0_1(64, 1);
-    TASSIGN(exp_corr_fifo_0_1, 0x14600);
-    using exp_corr_rm_fifo_0_0Type = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    exp_corr_rm_fifo_0_0Type exp_corr_rm_fifo_0_0(1, 64);
-    TASSIGN(exp_corr_rm_fifo_0_0, 0x14500);
-    using exp_corr_rm_fifo_0_1Type = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    exp_corr_rm_fifo_0_1Type exp_corr_rm_fifo_0_1(1, 64);
-    TASSIGN(exp_corr_rm_fifo_0_1, 0x14600);
-    using running_o_0Type = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    running_o_0Type running_o_0(64, 128);
-    TASSIGN(running_o_0, 0x14700);
-    using pv_vec_0Type = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    pv_vec_0Type pv_vec_0(64, 128);
-    TASSIGN(pv_vec_0, 0x1c700);
-    using o_f16_0Type = Tile<TileType::Vec, half, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
-    o_f16_0Type o_f16_0(64, 128);
-    TASSIGN(o_f16_0, 0x24700);
-    #endif  // __DAV_VEC__
+    using qk_vecType = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
+    qk_vecType qk_vec(64, 128); TASSIGN(qk_vec, 0x0);
+    using tmp_vecType = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
+    tmp_vecType tmp_vec(64, 128); TASSIGN(tmp_vec, 0x8000);
+    using p_f16Type = Tile<TileType::Vec, half, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
+    p_f16Type p_f16(64, 128); TASSIGN(p_f16, 0x10000);
+    using reduce_dstType = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512>;
+    reduce_dstType reduce_dst(64, 1); TASSIGN(reduce_dst, 0x14000);
+    using reduce_dst_rmType = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
+    reduce_dst_rmType reduce_dst_rm(1, 64); TASSIGN(reduce_dst_rm, 0x14000);
+    using gmax_rmType = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
+    gmax_rmType gmax_rm_0(1, 64); TASSIGN(gmax_rm_0, 0x14100);
+    gmax_rmType gmax_rm_1(1, 64); TASSIGN(gmax_rm_1, 0x14200);
+    using gsum_colType = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512>;
+    gsum_colType gsum_col_0(64, 1); TASSIGN(gsum_col_0, 0x14300);
+    gsum_colType gsum_col_1(64, 1); TASSIGN(gsum_col_1, 0x14400);
+    using gsum_rmType = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
+    gsum_rmType gsum_rm_0(1, 64); TASSIGN(gsum_rm_0, 0x14300);
+    gsum_rmType gsum_rm_1(1, 64); TASSIGN(gsum_rm_1, 0x14400);
+    using ecorr_colType = Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512>;
+    ecorr_colType ecorr_col_0(64, 1); TASSIGN(ecorr_col_0, 0x14500);
+    ecorr_colType ecorr_col_1(64, 1); TASSIGN(ecorr_col_1, 0x14600);
+    using ecorr_rmType = Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
+    ecorr_rmType ecorr_rm_0(1, 64); TASSIGN(ecorr_rm_0, 0x14500);
+    ecorr_rmType ecorr_rm_1(1, 64); TASSIGN(ecorr_rm_1, 0x14600);
+    using running_oType = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
+    running_oType running_o(64, 128); TASSIGN(running_o, 0x14700);
+    using pv_vecType = Tile<TileType::Vec, float, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
+    pv_vecType pv_vec(64, 128); TASSIGN(pv_vec, 0x1c700);
+    using o_f16Type = Tile<TileType::Vec, half, 64, 128, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512>;
+    o_f16Type o_f16(64, 128); TASSIGN(o_f16, 0x24700);
+    #endif
 
 
-    // Function body
-    auto sq_dim_0 = _local_Sq;
-    auto skv_dim_0 = _local_Skv;
-    auto sq_tiles_0 = ((sq_dim_0 + 127) / 128);
-    auto skv_tiles_0 = ((skv_dim_0 + 127) / 128);
-    auto num_cores_0 = (int32_t)(get_block_num());
-    auto core_id_0 = (int32_t)(get_block_idx());
     #if defined(__DAV_CUBE__)
-    set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
-    set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
-    set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
-    set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID3);
-    set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
-    set_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
-    set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
-    set_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
-    auto _ctx_sq_off_0 = 0;
-    auto _ctx_row_off_0 = 0;
-    auto _ctx_task_id_0 = 0;
-    auto _ctx_q_count_0 = 0;
-    auto _ctx_buf_idx_0 = 0;
-    auto _ctx_l0ab_idx_0 = 0;
-    auto _ctx_l0c_idx_0 = 0;
-    auto _ctx_core_id_0 = core_id_0;
-    // Loop-carried values initialization
-    auto _ctx_buf_idx_iter_1 = _ctx_buf_idx_0;
-    auto _ctx_l0ab_idx_iter_1 = _ctx_l0ab_idx_0;
-    auto _ctx_l0c_idx_iter_1 = _ctx_l0c_idx_0;
-    auto _ctx_q_count_iter_1 = _ctx_q_count_0;
-    auto _ctx_row_off_iter_1 = _ctx_row_off_0;
-    auto _ctx_sq_off_iter_1 = _ctx_sq_off_0;
-    auto _ctx_task_id_iter_1 = _ctx_task_id_0;
+    // --- CUBE ---
+    const event_t E0 = (event_t)0, E1 = (event_t)1, E2 = (event_t)2, E3 = (event_t)3;
+    const event_t eid01[] = {E0, E1};
+    const event_t eid23[] = {E2, E3};
 
-    const event_t _eid_0_1[] = {(event_t)0, (event_t)1};
-    Tile<TileType::Mat, half, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512> q_mat_buf_0[] = {q_mat_buf_0_0, q_mat_buf_0_1};
-    Tile<TileType::Mat, half, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512> k_mat_buf_0[] = {k_mat_buf_0_0, k_mat_buf_0_1};
-    Tile<TileType::Left, half, 64, 128, BLayout::RowMajor, -1, -1, SLayout::RowMajor, 512> left_buf_0[] = {left_buf_0_0, left_buf_0_1};
-    Tile<TileType::Right, half, 128, 128, BLayout::RowMajor, -1, -1, SLayout::ColMajor, 512> right_buf_0[] = {right_buf_0_0, right_buf_0_1};
-    Tile<TileType::Acc, float, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 1024> acc_buf_0[] = {acc_buf_0_0, acc_buf_0_1};
-    const event_t _eid_2_3[] = {(event_t)2, (event_t)3};
-    Tile<TileType::Mat, half, 128, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512> v_mat_buf_0[] = {v_mat_buf_0_0, v_mat_buf_0_1};
-    Tile<TileType::Mat, half, 64, 128, BLayout::ColMajor, -1, -1, SLayout::RowMajor, 512> p_mat_buf_0[] = {p_mat_buf_0_0, p_mat_buf_0_1};
-    const event_t _eid_4_5[] = {(event_t)4, (event_t)5};
+    q_mat_buf_Type  q_mat_buf[] = {q_mat_buf_0, q_mat_buf_1};
+    k_mat_buf_Type  k_mat_buf[] = {k_mat_buf_0, k_mat_buf_1};
+    left_buf_Type   left_buf[]  = {left_buf_0, left_buf_1};
+    right_buf_Type  right_buf[] = {right_buf_0, right_buf_1};
+    acc_buf_Type    acc_buf[]   = {acc_buf_0, acc_buf_1};
+    v_mat_buf_Type  v_mat_buf[] = {v_mat_buf_0, v_mat_buf_1};
+    p_mat_buf_Type  p_mat_buf[] = {p_mat_buf_0, p_mat_buf_1};
 
-    for (uint64_t qi_0 = core_id_0; qi_0 < sq_tiles_0; qi_0 += num_cores_0) {
-        auto _ctx_sq_off_3 = (qi_0 * 128);
-        // Loop-carried values initialization
-        auto _ctx_buf_idx_iter_3 = _ctx_buf_idx_iter_1;
-        auto _ctx_l0ab_idx_iter_3 = _ctx_l0ab_idx_iter_1;
-        auto _ctx_l0c_idx_iter_3 = _ctx_l0c_idx_iter_1;
-        auto _ctx_q_count_iter_3 = _ctx_q_count_iter_1;
-        auto _ctx_row_off_iter_3 = _ctx_row_off_iter_1;
-        auto _ctx_task_id_iter_3 = _ctx_task_id_iter_1;
+    set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0); set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
+    set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2); set_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID3);
+    set_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);    set_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+    set_flag(PIPE_FIX, PIPE_M, EVENT_ID0);     set_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
 
-        for (uint64_t row_idx_0 = 0; row_idx_0 < 2; row_idx_0 += 1) {
-            auto _ctx_row_off_5 = (row_idx_0 * 64);
-            // Loop-carried values initialization
-            auto _ctx_buf_idx_iter_5 = _ctx_buf_idx_iter_3;
-            auto _ctx_l0ab_idx_iter_5 = _ctx_l0ab_idx_iter_3;
-            auto _ctx_l0c_idx_iter_5 = _ctx_l0c_idx_iter_3;
-            auto _ctx_task_id_iter_5 = _ctx_task_id_iter_3;
+    int32_t l0ab = 0, l0c = 0, q_count = 0;
+    // Pre-compute core's pv_buf base (constant across all iterations)
+    const int64_t pv_core_base = (int64_t)core_id * 512;
 
-            for (uint64_t pre_0 = 0; pre_0 < 1; pre_0 += 1) {
-                auto _ctx_task_id_7 = pre_0;
-                auto _ctx_buf_idx_7 = (((_ctx_q_count_iter_3 * skv_tiles_0) + pre_0) % 2);
-                auto q_mat_idx_0 = (_ctx_q_count_iter_3 % 2);
-                auto qk_fifo_slot_0 = (_ctx_task_id_7 % 2);
-                auto skv_off_0 = (_ctx_task_id_7 * 128);
+    for (int32_t qi = core_id; qi < sq_tiles; qi += num_cores) {
+        const int64_t sq_off = (int64_t)qi << 7;  // qi * 128
 
-                wait_flag(PIPE_MTE1, PIPE_MTE2, _eid_0_1[_ctx_buf_idx_7]);
-                if ((_ctx_task_id_7 == 0)) {
+        for (int32_t row_idx = 0; row_idx < 2; row_idx++) {
+            const int64_t row_off = (int64_t)row_idx << 6;  // row_idx * 64
+            const int32_t qmi = q_count & 1;  // q_mat_idx
+            // Pre-compute row base for qk/p buffer addressing
+            const int64_t row_base = sq_off + row_off;
+            // Pre-compute Q global address (shared by QK prologue + all QK in this row_off)
+            __gm__ half* q_addr = q + (row_base * D);
+            // Pre-compute pv_buf row bases
+            const int64_t pv_q_base = pv_core_base + ((int64_t)(qmi << 1) << 7); // qmi*2*128
 
-                    TASSIGN(q_0Global, q_0 + ((_ctx_sq_off_3 + _ctx_row_off_5) * _local_D + 0));
-                    TLOAD(q_mat_buf_0[q_mat_idx_0], q_0Global);
-                }
+            // ---- Prologue: QK task_id=0 ----
+            {
+                const int32_t bi = (q_count * skv_tiles) & 1;
 
-
-                TASSIGN(k_0Global, k_0 + (skv_off_0 * _local_D + 0));
-                TLOAD(k_mat_buf_0[_ctx_buf_idx_7], k_0Global);
+                wait_flag(PIPE_MTE1, PIPE_MTE2, eid01[bi]);
+                TASSIGN(qGlobal, q_addr);
+                TLOAD(q_mat_buf[qmi], qGlobal);
+                TASSIGN(kGlobal, k);
+                TLOAD(k_mat_buf[bi], kGlobal);
                 set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
                 wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
 
-                wait_flag(PIPE_M, PIPE_MTE1, _eid_0_1[_ctx_l0ab_idx_iter_5]);
-
-
-                TMOV(left_buf_0[_ctx_l0ab_idx_iter_5], q_mat_buf_0[q_mat_idx_0]);
-
-
-                TMOV(right_buf_0[_ctx_l0ab_idx_iter_5], k_mat_buf_0[_ctx_buf_idx_7]);
+                wait_flag(PIPE_M, PIPE_MTE1, eid01[l0ab]);
+                TMOV(left_buf[l0ab], q_mat_buf[qmi]);
+                TMOV(right_buf[l0ab], k_mat_buf[bi]);
                 set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
                 wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+                set_flag(PIPE_MTE1, PIPE_MTE2, eid01[bi]);
 
-                set_flag(PIPE_MTE1, PIPE_MTE2, _eid_0_1[_ctx_buf_idx_7]);
-
-                wait_flag(PIPE_FIX, PIPE_M, _eid_0_1[_ctx_l0c_idx_iter_5]);
-
-
-
-                TMATMUL(acc_buf_0[_ctx_l0c_idx_iter_5], left_buf_0[_ctx_l0ab_idx_iter_5], right_buf_0[_ctx_l0ab_idx_iter_5]);
+                wait_flag(PIPE_FIX, PIPE_M, eid01[l0c]);
+                TMATMUL(acc_buf[l0c], left_buf[l0ab], right_buf[l0ab]);
                 set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
                 wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+                set_flag(PIPE_M, PIPE_MTE1, eid01[l0ab]);
 
-                set_flag(PIPE_M, PIPE_MTE1, _eid_0_1[_ctx_l0ab_idx_iter_5]);
+                TASSIGN(qk_bufGlobal, qk_buf + (row_base * Skv));
+                TSTORE(qk_bufGlobal, acc_buf[l0c]);
+                set_flag(PIPE_FIX, PIPE_M, eid01[l0c]);
 
-                TASSIGN(qk_buf_0Global, qk_buf_0 + ((((qk_fifo_slot_0 * sq_dim_0) + _ctx_sq_off_3) + _ctx_row_off_5) * _local_Skv + skv_off_0));
-                TSTORE(qk_buf_0Global, acc_buf_0[_ctx_l0c_idx_iter_5]);
-
-                set_flag(PIPE_FIX, PIPE_M, _eid_0_1[_ctx_l0c_idx_iter_5]);
-                auto _ctx_l0ab_idx_7 = (1 - _ctx_l0ab_idx_iter_5);
-                auto _ctx_l0c_idx_7 = (1 - _ctx_l0c_idx_iter_5);
-
-                ffts_cross_core_sync(PIPE_FIX, getFFTSMsg(FFTS_MODE_VAL, _eid_0_1[qk_fifo_slot_0]));
-                _ctx_buf_idx_iter_5 = _ctx_buf_idx_7;
-                _ctx_l0ab_idx_iter_5 = _ctx_l0ab_idx_7;
-                _ctx_l0c_idx_iter_5 = _ctx_l0c_idx_7;
-                _ctx_task_id_iter_5 = _ctx_task_id_7;
+                l0ab ^= 1; l0c ^= 1;
+                ffts_cross_core_sync(PIPE_FIX, getFFTSMsg(FFTS_MODE_VAL, E0));
             }
 
-            // Loop-carried values initialization
-            auto _ctx_buf_idx_iter_8 = _ctx_buf_idx_iter_5;
-            auto _ctx_l0ab_idx_iter_8 = _ctx_l0ab_idx_iter_5;
-            auto _ctx_l0c_idx_iter_8 = _ctx_l0c_idx_iter_5;
-            auto _ctx_task_id_iter_8 = _ctx_task_id_iter_5;
+            // ---- Main loop ----
+            for (int32_t ki = 0; ki < skv_tiles; ki++) {
+                const int32_t nk = ki + 1;
 
-            for (uint64_t ki_0 = 0; ki_0 < skv_tiles_0; ki_0 += 1) {
-                auto next_ki_0 = (ki_0 + 1);
-                int64_t _ctx_buf_idx_11;
-                int64_t _ctx_l0ab_idx_11;
-                int64_t _ctx_l0c_idx_11;
-                int64_t _ctx_task_id_11;
+                // -- QK pre-compute for nk --
+                if (nk < skv_tiles) {
+                    const int32_t bi_qk = ((q_count * skv_tiles + nk) & 1);
+                    const int64_t skv_off = (int64_t)nk << 7;
+                    const int32_t fifo = nk & 1;
 
-                if ((next_ki_0 < skv_tiles_0)) {
-                    auto _ctx_task_id_10 = next_ki_0;
-                    auto _ctx_buf_idx_10 = (((_ctx_q_count_iter_3 * skv_tiles_0) + next_ki_0) % 2);
-                    auto q_mat_idx_1 = (_ctx_q_count_iter_3 % 2);
-                    auto qk_fifo_slot_1 = (_ctx_task_id_10 % 2);
-                    auto skv_off_1 = (_ctx_task_id_10 * 128);
-
-                    wait_flag(PIPE_MTE1, PIPE_MTE2, _eid_0_1[_ctx_buf_idx_10]);
-                    if ((_ctx_task_id_10 == 0)) {
-
-                        TASSIGN(q_0Global, q_0 + ((_ctx_sq_off_3 + _ctx_row_off_5) * _local_D + 0));
-                        TLOAD(q_mat_buf_0[q_mat_idx_1], q_0Global);
-                    }
-
-
-                    TASSIGN(k_0Global, k_0 + (skv_off_1 * _local_D + 0));
-                    TLOAD(k_mat_buf_0[_ctx_buf_idx_10], k_0Global);
+                    wait_flag(PIPE_MTE1, PIPE_MTE2, eid01[bi_qk]);
+                    TASSIGN(kGlobal, k + (skv_off * D));
+                    TLOAD(k_mat_buf[bi_qk], kGlobal);
                     set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
                     wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
 
-                    wait_flag(PIPE_M, PIPE_MTE1, _eid_0_1[_ctx_l0ab_idx_iter_8]);
+                    wait_flag(PIPE_M, PIPE_MTE1, eid01[l0ab]);
+                    TMOV(left_buf[l0ab], q_mat_buf[qmi]);
+                    TMOV(right_buf[l0ab], k_mat_buf[bi_qk]);
+                    set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+                    wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
+                    set_flag(PIPE_MTE1, PIPE_MTE2, eid01[bi_qk]);
 
+                    wait_flag(PIPE_FIX, PIPE_M, eid01[l0c]);
+                    TMATMUL(acc_buf[l0c], left_buf[l0ab], right_buf[l0ab]);
+                    set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+                    wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+                    set_flag(PIPE_M, PIPE_MTE1, eid01[l0ab]);
 
-                    TMOV(left_buf_0[_ctx_l0ab_idx_iter_8], q_mat_buf_0[q_mat_idx_1]);
+                    TASSIGN(qk_bufGlobal, qk_buf + (((int64_t)fifo * sq_dim + row_base) * Skv + skv_off));
+                    TSTORE(qk_bufGlobal, acc_buf[l0c]);
+                    set_flag(PIPE_FIX, PIPE_M, eid01[l0c]);
 
+                    l0ab ^= 1; l0c ^= 1;
+                    ffts_cross_core_sync(PIPE_FIX, getFFTSMsg(FFTS_MODE_VAL, eid01[fifo]));
+                }
 
-                    TMOV(right_buf_0[_ctx_l0ab_idx_iter_8], k_mat_buf_0[_ctx_buf_idx_10]);
+                // -- PV for ki --
+                {
+                    const int32_t bi_pv = ((q_count * skv_tiles + ki) & 1);
+                    const int64_t sv_off = (int64_t)ki << 7;
+                    const int32_t pv_slot = ki & 1;
+
+                    wait_flag(PIPE_MTE1, PIPE_MTE2, eid23[bi_pv]);
+                    TASSIGN(vGlobal, v + (sv_off * D));
+                    TLOAD(v_mat_buf[bi_pv], vGlobal);
+
+                    wait_flag_dev(eid23[pv_slot]);
+                    TASSIGN(p_bufGlobal, p_buf + (((int64_t)pv_slot * sq_dim + row_base) * Skv + sv_off));
+                    TLOAD(p_mat_buf[bi_pv], p_bufGlobal);
+                    set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+                    wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
+
+                    wait_flag(PIPE_M, PIPE_MTE1, eid01[l0ab]);
+                    TMOV(left_buf[l0ab], p_mat_buf[bi_pv]);
+                    TMOV(right_buf[l0ab], v_mat_buf[bi_pv]);
+                    set_flag(PIPE_MTE1, PIPE_MTE2, eid23[bi_pv]);
                     set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
                     wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
 
-                    set_flag(PIPE_MTE1, PIPE_MTE2, _eid_0_1[_ctx_buf_idx_10]);
-
-                    wait_flag(PIPE_FIX, PIPE_M, _eid_0_1[_ctx_l0c_idx_iter_8]);
-
-
-
-                    TMATMUL(acc_buf_0[_ctx_l0c_idx_iter_8], left_buf_0[_ctx_l0ab_idx_iter_8], right_buf_0[_ctx_l0ab_idx_iter_8]);
+                    wait_flag(PIPE_FIX, PIPE_M, eid01[l0c]);
+                    TMATMUL(acc_buf[l0c], left_buf[l0ab], right_buf[l0ab]);
                     set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
                     wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
+                    set_flag(PIPE_M, PIPE_MTE1, eid01[l0ab]);
 
-                    set_flag(PIPE_M, PIPE_MTE1, _eid_0_1[_ctx_l0ab_idx_iter_8]);
+                    TASSIGN(pv_bufGlobal, pv_buf + ((pv_q_base + ((int64_t)pv_slot << 7) + row_off) * D));
+                    TSTORE(pv_bufGlobal, acc_buf[l0c]);
+                    set_flag(PIPE_FIX, PIPE_M, eid01[l0c]);
 
-                    TASSIGN(qk_buf_0Global, qk_buf_0 + ((((qk_fifo_slot_1 * sq_dim_0) + _ctx_sq_off_3) + _ctx_row_off_5) * _local_Skv + skv_off_1));
-                    TSTORE(qk_buf_0Global, acc_buf_0[_ctx_l0c_idx_iter_8]);
-
-                    set_flag(PIPE_FIX, PIPE_M, _eid_0_1[_ctx_l0c_idx_iter_8]);
-                    auto _ctx_l0ab_idx_10 = (1 - _ctx_l0ab_idx_iter_8);
-                    auto _ctx_l0c_idx_10 = (1 - _ctx_l0c_idx_iter_8);
-
-                    ffts_cross_core_sync(PIPE_FIX, getFFTSMsg(FFTS_MODE_VAL, _eid_0_1[qk_fifo_slot_1]));
-                    _ctx_buf_idx_11 = _ctx_buf_idx_10;
-                    _ctx_l0ab_idx_11 = _ctx_l0ab_idx_10;
-                    _ctx_l0c_idx_11 = _ctx_l0c_idx_10;
-                    _ctx_task_id_11 = _ctx_task_id_10;
-                } else {
-                    _ctx_buf_idx_11 = _ctx_buf_idx_iter_8;
-                    _ctx_l0ab_idx_11 = _ctx_l0ab_idx_iter_8;
-                    _ctx_l0c_idx_11 = _ctx_l0c_idx_iter_8;
-                    _ctx_task_id_11 = _ctx_task_id_iter_8;
+                    l0ab ^= 1; l0c ^= 1;
+                    ffts_cross_core_sync(PIPE_FIX, getFFTSMsg(FFTS_MODE_VAL, (event_t)(4 + pv_slot)));
                 }
-
-                auto _ctx_task_id_12 = ki_0;
-                auto _ctx_buf_idx_12 = (((_ctx_q_count_iter_3 * skv_tiles_0) + ki_0) % 2);
-                auto q_mat_idx_2 = (_ctx_q_count_iter_3 % 2);
-                auto pv_task_slot_0 = (_ctx_task_id_12 % 2);
-                auto sv_off_0 = (_ctx_task_id_12 * 128);
-                auto pv_fifo_slot_0 = (_ctx_task_id_12 % 2);
-
-                wait_flag(PIPE_MTE1, PIPE_MTE2, _eid_2_3[_ctx_buf_idx_12]);
-
-                TASSIGN(v_0Global, v_0 + (sv_off_0 * _local_D + 0));
-                TLOAD(v_mat_buf_0[_ctx_buf_idx_12], v_0Global);
-
-                wait_flag_dev(_eid_2_3[pv_fifo_slot_0]);
-
-                TASSIGN(p_buf_0Global, p_buf_0 + ((((pv_fifo_slot_0 * sq_dim_0) + _ctx_sq_off_3) + _ctx_row_off_5) * _local_Skv + sv_off_0));
-                TLOAD(p_mat_buf_0[_ctx_buf_idx_12], p_buf_0Global);
-                set_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
-                wait_flag(PIPE_MTE2, PIPE_MTE1, EVENT_ID0);
-
-                wait_flag(PIPE_M, PIPE_MTE1, _eid_0_1[_ctx_l0ab_idx_11]);
-
-
-                TMOV(left_buf_0[_ctx_l0ab_idx_11], p_mat_buf_0[_ctx_buf_idx_12]);
-
-
-                TMOV(right_buf_0[_ctx_l0ab_idx_11], v_mat_buf_0[_ctx_buf_idx_12]);
-
-                set_flag(PIPE_MTE1, PIPE_MTE2, _eid_2_3[_ctx_buf_idx_12]);
-                set_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
-                wait_flag(PIPE_MTE1, PIPE_M, EVENT_ID0);
-
-                wait_flag(PIPE_FIX, PIPE_M, _eid_0_1[_ctx_l0c_idx_11]);
-
-
-
-                TMATMUL(acc_buf_0[_ctx_l0c_idx_11], left_buf_0[_ctx_l0ab_idx_11], right_buf_0[_ctx_l0ab_idx_11]);
-                set_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
-                wait_flag(PIPE_M, PIPE_FIX, EVENT_ID0);
-
-                set_flag(PIPE_M, PIPE_MTE1, _eid_0_1[_ctx_l0ab_idx_11]);
-
-                TASSIGN(pv_buf_0Global, pv_buf_0 + (((((_ctx_core_id_0 * 512) + ((q_mat_idx_2 * 2) * 128)) + (pv_task_slot_0 * 128)) + _ctx_row_off_5) * _local_D + 0));
-                TSTORE(pv_buf_0Global, acc_buf_0[_ctx_l0c_idx_11]);
-
-                set_flag(PIPE_FIX, PIPE_M, _eid_0_1[_ctx_l0c_idx_11]);
-                auto _ctx_l0ab_idx_12 = (1 - _ctx_l0ab_idx_11);
-                auto _ctx_l0c_idx_12 = (1 - _ctx_l0c_idx_11);
-
-                ffts_cross_core_sync(PIPE_FIX, getFFTSMsg(FFTS_MODE_VAL, _eid_4_5[pv_task_slot_0]));
-                _ctx_buf_idx_iter_8 = _ctx_buf_idx_12;
-                _ctx_l0ab_idx_iter_8 = _ctx_l0ab_idx_12;
-                _ctx_l0c_idx_iter_8 = _ctx_l0c_idx_12;
-                _ctx_task_id_iter_8 = _ctx_task_id_12;
             }
-
-            auto _ctx_q_count_5 = (_ctx_q_count_iter_3 + 1);
-            _ctx_buf_idx_iter_3 = _ctx_buf_idx_iter_8;
-            _ctx_l0ab_idx_iter_3 = _ctx_l0ab_idx_iter_8;
-            _ctx_l0c_idx_iter_3 = _ctx_l0c_idx_iter_8;
-            _ctx_q_count_iter_3 = _ctx_q_count_5;
-            _ctx_row_off_iter_3 = _ctx_row_off_5;
-            _ctx_task_id_iter_3 = _ctx_task_id_iter_8;
+            q_count++;
         }
-
-        _ctx_buf_idx_iter_1 = _ctx_buf_idx_iter_3;
-        _ctx_l0ab_idx_iter_1 = _ctx_l0ab_idx_iter_3;
-        _ctx_l0c_idx_iter_1 = _ctx_l0c_idx_iter_3;
-        _ctx_q_count_iter_1 = _ctx_q_count_iter_3;
-        _ctx_row_off_iter_1 = _ctx_row_off_iter_3;
-        _ctx_sq_off_iter_1 = _ctx_sq_off_3;
-        _ctx_task_id_iter_1 = _ctx_task_id_iter_3;
     }
 
-    wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0);
-    wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
-    wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2);
-    wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID3);
-    wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);
-    wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
-    wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);
-    wait_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
-    #endif  // __DAV_CUBE__
+    wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID0); wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID1);
+    wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID2); wait_flag(PIPE_MTE1, PIPE_MTE2, EVENT_ID3);
+    wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID0);    wait_flag(PIPE_M, PIPE_MTE1, EVENT_ID1);
+    wait_flag(PIPE_FIX, PIPE_M, EVENT_ID0);     wait_flag(PIPE_FIX, PIPE_M, EVENT_ID1);
+    #endif
+
     #if defined(__DAV_VEC__)
-    auto q_count_0 = 0;
-    // Loop-carried values initialization
-    auto q_count_iter_1 = q_count_0;
+    // --- VECTOR ---
+    const event_t E0 = (event_t)0, E1 = (event_t)1;
+    const event_t eid01[] = {E0, E1};
+    const event_t eid23[] = {(event_t)2, (event_t)3};
+    const event_t eid45[] = {(event_t)4, (event_t)5};
 
-    Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512> global_max_buf_0[] = {global_max_buf_0_0, global_max_buf_0_1};
-    Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512> global_max_rm_buf_0[] = {global_max_rm_buf_0_0, global_max_rm_buf_0_1};
-    Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512> global_sum_buf_0[] = {global_sum_buf_0_0, global_sum_buf_0_1};
-    Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512> global_sum_rm_buf_0[] = {global_sum_rm_buf_0_0, global_sum_rm_buf_0_1};
-    const event_t _eid_0_1[] = {(event_t)0, (event_t)1};
-    Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, -1, -1, SLayout::NoneBox, 512> exp_corr_rm_fifo_0[] = {exp_corr_rm_fifo_0_0, exp_corr_rm_fifo_0_1};
-    const event_t _eid_2_3[] = {(event_t)2, (event_t)3};
-    const event_t _eid_4_5[] = {(event_t)4, (event_t)5};
-    Tile<TileType::Vec, float, 64, 1, BLayout::ColMajor, -1, -1, SLayout::NoneBox, 512> exp_corr_fifo_0[] = {exp_corr_fifo_0_0, exp_corr_fifo_0_1};
+    gmax_rmType     gmax_rm[]  = {gmax_rm_0, gmax_rm_1};
+    gsum_colType    gsum_col[] = {gsum_col_0, gsum_col_1};
+    gsum_rmType     gsum_rm[]  = {gsum_rm_0, gsum_rm_1};
+    ecorr_rmType    ecorr_rm[] = {ecorr_rm_0, ecorr_rm_1};
+    ecorr_colType   ecorr_col[]= {ecorr_col_0, ecorr_col_1};
 
-    for (uint64_t qi_1 = core_id_0; qi_1 < sq_tiles_0; qi_1 += num_cores_0) {
-        auto sq_off_0 = (qi_1 * 128);
-        // Loop-carried values initialization
-        auto q_count_iter_3 = q_count_iter_1;
+    int32_t q_count = 0;
+    const int64_t pv_core_base = (int64_t)core_id * 512;
 
-        for (uint64_t row_idx_1 = 0; row_idx_1 < 2; row_idx_1 += 1) {
-            auto row_off_0 = (row_idx_1 * 64);
-            auto q_idx_0 = (q_count_iter_3 % 2);
+    for (int32_t qi = core_id; qi < sq_tiles; qi += num_cores) {
+        const int64_t sq_off = (int64_t)qi << 7;
 
+        for (int32_t row_idx = 0; row_idx < 2; row_idx++) {
+            const int64_t row_off = (int64_t)row_idx << 6;
+            const int32_t qx = q_count & 1;
+            const int64_t row_base = sq_off + row_off;
+            const int64_t pv_q_base = pv_core_base + ((int64_t)(qx << 1) << 7);
 
-
-
-            for (uint64_t pre_1 = 0; pre_1 < 1; pre_1 += 1) {
-                auto p_fifo_slot_0 = (pre_1 % 2);
-
-                wait_flag_dev(_eid_0_1[p_fifo_slot_0]);
-                auto p_fifo_slot_1 = (pre_1 % 2);
-                auto skv_off_2 = (pre_1 * 128);
-                TASSIGN(qk_buf_0Global, qk_buf_0 + ((((p_fifo_slot_1 * sq_dim_0) + sq_off_0) + row_off_0) * _local_Skv + skv_off_2));
-                TLOAD(qk_vec_0, qk_buf_0Global);
+            // ---- Prologue: softmax task_id=0 ----
+            {
+                wait_flag_dev(E0);
+                TASSIGN(qk_bufGlobal, qk_buf + (row_base * Skv));
+                TLOAD(qk_vec, qk_bufGlobal);
                 set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
                 wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-                if ((pre_1 == 0)) {
-                    TROWMAX(reduce_dst_0, qk_vec_0, tmp_vec_0);
-                    pipe_barrier(PIPE_V);
-                    TROWEXPANDSUB(tmp_vec_0, qk_vec_0, reduce_dst_0);
-                    TMULS(global_max_rm_buf_0[q_idx_0], reduce_dst_rm_0, 1.000000);
-                    TMULS(tmp_vec_0, tmp_vec_0, 0.088388);
-                    TEXP(qk_vec_0, tmp_vec_0);
-                    pipe_barrier(PIPE_V);
-                    TROWSUM(reduce_dst_0, qk_vec_0, tmp_vec_0);
-                    pipe_barrier(PIPE_V);
-                    TMULS(global_sum_rm_buf_0[q_idx_0], reduce_dst_rm_0, 1.000000);
-                    TCVT(p_f16_0, qk_vec_0, RoundMode::CAST_ROUND);
-                }
 
-                if ((pre_1 > 0)) {
-                    TROWMAX(reduce_dst_0, qk_vec_0, tmp_vec_0);
-                    pipe_barrier(PIPE_V);
-                    TMAX(reduce_dst_rm_0, reduce_dst_rm_0, global_max_rm_buf_0[q_idx_0]);
-                    pipe_barrier(PIPE_V);
-
-                    TSUB(exp_corr_rm_fifo_0[p_fifo_slot_1], global_max_rm_buf_0[q_idx_0], reduce_dst_rm_0);
-                    pipe_barrier(PIPE_V);
-                    TMULS(global_max_rm_buf_0[q_idx_0], reduce_dst_rm_0, 1.000000);
-                    pipe_barrier(PIPE_V);
-                    TROWEXPANDSUB(tmp_vec_0, qk_vec_0, reduce_dst_0);
-
-
-                    TMULS(exp_corr_rm_fifo_0[p_fifo_slot_1], exp_corr_rm_fifo_0[p_fifo_slot_1], 0.088388);
-                    TMULS(tmp_vec_0, tmp_vec_0, 0.088388);
-
-
-                    TEXP(exp_corr_rm_fifo_0[p_fifo_slot_1], exp_corr_rm_fifo_0[p_fifo_slot_1]);
-                    TEXP(qk_vec_0, tmp_vec_0);
-                    TCVT(p_f16_0, qk_vec_0, RoundMode::CAST_ROUND);
-                    pipe_barrier(PIPE_V);
-
-                    TMUL(global_sum_rm_buf_0[q_idx_0], global_sum_rm_buf_0[q_idx_0], exp_corr_rm_fifo_0[p_fifo_slot_1]);
-                    TROWSUM(reduce_dst_0, qk_vec_0, tmp_vec_0);
-                    pipe_barrier(PIPE_V);
-                    TADD(global_sum_rm_buf_0[q_idx_0], global_sum_rm_buf_0[q_idx_0], reduce_dst_rm_0);
-                }
+                TROWMAX(reduce_dst, qk_vec, tmp_vec);
+                pipe_barrier(PIPE_V);
+                TROWEXPANDSUB(tmp_vec, qk_vec, reduce_dst);
+                TMULS(gmax_rm[qx], reduce_dst_rm, 1.0f);
+                TMULS(tmp_vec, tmp_vec, 0.088388f);
+                TEXP(qk_vec, tmp_vec);
+                pipe_barrier(PIPE_V);
+                TROWSUM(reduce_dst, qk_vec, tmp_vec);
+                pipe_barrier(PIPE_V);
+                TMULS(gsum_rm[qx], reduce_dst_rm, 1.0f);
+                TCVT(p_f16, qk_vec, RoundMode::CAST_ROUND);
 
                 set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
                 wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-                TASSIGN(p_buf_0Global, p_buf_0 + ((((p_fifo_slot_1 * sq_dim_0) + sq_off_0) + row_off_0) * _local_Skv + skv_off_2));
-                TSTORE(p_buf_0Global, p_f16_0);
-
-                ffts_cross_core_sync(PIPE_MTE3, getFFTSMsg(FFTS_MODE_VAL, _eid_2_3[p_fifo_slot_1]));
+                TASSIGN(p_bufGlobal, p_buf + (row_base * Skv));
+                TSTORE(p_bufGlobal, p_f16);
+                ffts_cross_core_sync(PIPE_MTE3, getFFTSMsg(FFTS_MODE_VAL, eid23[0]));
             }
 
-            for (uint64_t ki_1 = 0; ki_1 < skv_tiles_0; ki_1 += 1) {
-                auto next_ki_1 = (ki_1 + 1);
-                if ((next_ki_1 < skv_tiles_0)) {
-                    auto p_fifo_slot_2 = (next_ki_1 % 2);
+            // ---- Main loop ----
+            for (int32_t ki = 0; ki < skv_tiles; ki++) {
+                const int32_t nk = ki + 1;
 
-                    wait_flag_dev(_eid_0_1[p_fifo_slot_2]);
-                    auto p_fifo_slot_3 = (next_ki_1 % 2);
-                    auto skv_off_3 = (next_ki_1 * 128);
-                    TASSIGN(qk_buf_0Global, qk_buf_0 + ((((p_fifo_slot_3 * sq_dim_0) + sq_off_0) + row_off_0) * _local_Skv + skv_off_3));
-                    TLOAD(qk_vec_0, qk_buf_0Global);
+                // -- Softmax for nk --
+                if (nk < skv_tiles) {
+                    const int32_t fifo = nk & 1;
+                    const int64_t skv_off = (int64_t)nk << 7;
+
+                    wait_flag_dev(eid01[fifo]);
+                    TASSIGN(qk_bufGlobal, qk_buf + (((int64_t)fifo * sq_dim + row_base) * Skv + skv_off));
+                    TLOAD(qk_vec, qk_bufGlobal);
                     set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
                     wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-                    if ((next_ki_1 == 0)) {
-                        TROWMAX(reduce_dst_0, qk_vec_0, tmp_vec_0);
-                        pipe_barrier(PIPE_V);
-                        TROWEXPANDSUB(tmp_vec_0, qk_vec_0, reduce_dst_0);
-                        TMULS(global_max_rm_buf_0[q_idx_0], reduce_dst_rm_0, 1.000000);
-                        TMULS(tmp_vec_0, tmp_vec_0, 0.088388);
-                        TEXP(qk_vec_0, tmp_vec_0);
-                        pipe_barrier(PIPE_V);
-                        TROWSUM(reduce_dst_0, qk_vec_0, tmp_vec_0);
-                        pipe_barrier(PIPE_V);
-                        TMULS(global_sum_rm_buf_0[q_idx_0], reduce_dst_rm_0, 1.000000);
-                        TCVT(p_f16_0, qk_vec_0, RoundMode::CAST_ROUND);
-                    }
 
-                    if ((next_ki_1 > 0)) {
-                        TROWMAX(reduce_dst_0, qk_vec_0, tmp_vec_0);
-                        pipe_barrier(PIPE_V);
-                        TMAX(reduce_dst_rm_0, reduce_dst_rm_0, global_max_rm_buf_0[q_idx_0]);
-                        pipe_barrier(PIPE_V);
-
-                        TSUB(exp_corr_rm_fifo_0[p_fifo_slot_3], global_max_rm_buf_0[q_idx_0], reduce_dst_rm_0);
-                        pipe_barrier(PIPE_V);
-                        TMULS(global_max_rm_buf_0[q_idx_0], reduce_dst_rm_0, 1.000000);
-                        pipe_barrier(PIPE_V);
-                        TROWEXPANDSUB(tmp_vec_0, qk_vec_0, reduce_dst_0);
-
-
-                        TMULS(exp_corr_rm_fifo_0[p_fifo_slot_3], exp_corr_rm_fifo_0[p_fifo_slot_3], 0.088388);
-                        TMULS(tmp_vec_0, tmp_vec_0, 0.088388);
-
-
-                        TEXP(exp_corr_rm_fifo_0[p_fifo_slot_3], exp_corr_rm_fifo_0[p_fifo_slot_3]);
-                        TEXP(qk_vec_0, tmp_vec_0);
-                        TCVT(p_f16_0, qk_vec_0, RoundMode::CAST_ROUND);
-                        pipe_barrier(PIPE_V);
-
-                        TMUL(global_sum_rm_buf_0[q_idx_0], global_sum_rm_buf_0[q_idx_0], exp_corr_rm_fifo_0[p_fifo_slot_3]);
-                        TROWSUM(reduce_dst_0, qk_vec_0, tmp_vec_0);
-                        pipe_barrier(PIPE_V);
-                        TADD(global_sum_rm_buf_0[q_idx_0], global_sum_rm_buf_0[q_idx_0], reduce_dst_rm_0);
-                    }
+                    TROWMAX(reduce_dst, qk_vec, tmp_vec);
+                    pipe_barrier(PIPE_V);
+                    TMAX(reduce_dst_rm, reduce_dst_rm, gmax_rm[qx]);
+                    pipe_barrier(PIPE_V);
+                    TSUB(ecorr_rm[fifo], gmax_rm[qx], reduce_dst_rm);
+                    pipe_barrier(PIPE_V);
+                    TMULS(gmax_rm[qx], reduce_dst_rm, 1.0f);
+                    pipe_barrier(PIPE_V);
+                    TROWEXPANDSUB(tmp_vec, qk_vec, reduce_dst);
+                    TMULS(ecorr_rm[fifo], ecorr_rm[fifo], 0.088388f);
+                    TMULS(tmp_vec, tmp_vec, 0.088388f);
+                    TEXP(ecorr_rm[fifo], ecorr_rm[fifo]);
+                    TEXP(qk_vec, tmp_vec);
+                    TCVT(p_f16, qk_vec, RoundMode::CAST_ROUND);
+                    pipe_barrier(PIPE_V);
+                    TMUL(gsum_rm[qx], gsum_rm[qx], ecorr_rm[fifo]);
+                    TROWSUM(reduce_dst, qk_vec, tmp_vec);
+                    pipe_barrier(PIPE_V);
+                    TADD(gsum_rm[qx], gsum_rm[qx], reduce_dst_rm);
 
                     set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
                     wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-                    TASSIGN(p_buf_0Global, p_buf_0 + ((((p_fifo_slot_3 * sq_dim_0) + sq_off_0) + row_off_0) * _local_Skv + skv_off_3));
-                    TSTORE(p_buf_0Global, p_f16_0);
-
-                    ffts_cross_core_sync(PIPE_MTE3, getFFTSMsg(FFTS_MODE_VAL, _eid_2_3[p_fifo_slot_3]));
+                    TASSIGN(p_bufGlobal, p_buf + (((int64_t)fifo * sq_dim + row_base) * Skv + skv_off));
+                    TSTORE(p_bufGlobal, p_f16);
+                    ffts_cross_core_sync(PIPE_MTE3, getFFTSMsg(FFTS_MODE_VAL, eid23[fifo]));
                 }
 
-                auto q_mat_idx_3 = (q_count_iter_3 % 2);
-                auto pv_slot_0 = (ki_1 % 2);
+                // -- GU for ki --
+                {
+                    const int32_t pvs = ki & 1;
+                    wait_flag_dev(eid45[pvs]);
 
-                wait_flag_dev(_eid_4_5[pv_slot_0]);
-                if ((ki_1 == 0)) {
-                    TASSIGN(pv_buf_0Global, pv_buf_0 + (((((core_id_0 * 512) + ((q_mat_idx_3 * 2) * 128)) + (pv_slot_0 * 128)) + row_off_0) * _local_D + 0));
-                    TLOAD(running_o_0, pv_buf_0Global);
-                    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-                    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+                    __gm__ float* pv_addr = pv_buf + ((pv_q_base + ((int64_t)pvs << 7) + row_off) * D);
+                    if (ki == 0) {
+                        TASSIGN(pv_bufGlobal, pv_addr);
+                        TLOAD(running_o, pv_bufGlobal);
+                        set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+                        wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+                    } else {
+                        TASSIGN(pv_bufGlobal, pv_addr);
+                        TLOAD(pv_vec, pv_bufGlobal);
+                        set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+                        wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
+                        TROWEXPANDMUL(running_o, running_o, ecorr_col[pvs]);
+                        TADD(running_o, running_o, pv_vec);
+                    }
                 }
-
-                if ((ki_1 > 0)) {
-                    auto gu_fifo_slot_0 = (ki_1 % 2);
-                    TASSIGN(pv_buf_0Global, pv_buf_0 + (((((core_id_0 * 512) + ((q_mat_idx_3 * 2) * 128)) + (pv_slot_0 * 128)) + row_off_0) * _local_D + 0));
-                    TLOAD(pv_vec_0, pv_buf_0Global);
-                    set_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-                    wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID0);
-
-                    TROWEXPANDMUL(running_o_0, running_o_0, exp_corr_fifo_0[gu_fifo_slot_0]);
-                    TADD(running_o_0, running_o_0, pv_vec_0);
-                }
-
             }
 
-            auto q_count_5 = (q_count_iter_3 + 1);
-            TROWEXPANDDIV(running_o_0, running_o_0, global_sum_buf_0[q_idx_0]);
-            TCVT(o_f16_0, running_o_0, RoundMode::CAST_ROUND);
+            TROWEXPANDDIV(running_o, running_o, gsum_col[qx]);
+            TCVT(o_f16, running_o, RoundMode::CAST_ROUND);
             set_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
             wait_flag(PIPE_V, PIPE_MTE3, EVENT_ID0);
-            TASSIGN(o_0Global, o_0 + ((sq_off_0 + row_off_0) * _local_D + 0));
-            TSTORE(o_0Global, o_f16_0);
-            q_count_iter_3 = q_count_5;
+            TASSIGN(oGlobal, o + (row_base * D));
+            TSTORE(oGlobal, o_f16);
+            q_count++;
         }
-
-        q_count_iter_1 = q_count_iter_3;
     }
-
-    #endif  // __DAV_VEC__
+    #endif
 }

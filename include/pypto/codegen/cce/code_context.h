@@ -108,6 +108,27 @@ class CodeContext {
   std::string GetTensorStruct(const std::string& tensor_var_name) const;
 
   /**
+   * @brief Register a scalar copy alias: cpp_name is an alias for target_name.
+   *
+   * Instead of emitting `auto cpp_name = target_name;`, the codegen records that
+   * cpp_name should resolve to target_name everywhere.  Aliases are transitive
+   * (if A→B and B→C, then A resolves to C).
+   */
+  void RegisterAlias(const std::string& cpp_name, const std::string& target_name);
+
+  /**
+   * @brief Resolve alias chain to the canonical (root) C++ variable name.
+   *
+   * If cpp_name has no alias, returns cpp_name unchanged.
+   */
+  [[nodiscard]] std::string ResolveAlias(const std::string& cpp_name) const;
+
+  /**
+   * @brief Check whether a C++ name is an alias (not a real declaration).
+   */
+  [[nodiscard]] bool IsAlias(const std::string& cpp_name) const;
+
+  /**
    * @brief Clear all state
    */
   void Clear();
@@ -118,6 +139,8 @@ class CodeContext {
       tensor_to_pointer_;  ///< Mapping from tensor var to raw pointer
   std::unordered_map<std::string, std::string>
       tensor_to_struct_pointer_;  ///< Mapping from tensor var to Tensor struct pointer
+  std::unordered_map<std::string, std::string>
+      alias_map_;  ///< Copy-propagation: cpp_name → canonical target
 };
 
 }  // namespace codegen

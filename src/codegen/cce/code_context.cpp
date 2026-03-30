@@ -33,9 +33,11 @@ void CodeContext::RegisterVar(const ir::VarPtr& var, const std::string& cpp_name
   CHECK(var != nullptr) << "Cannot register null variable";
   CHECK(!cpp_name.empty()) << "Cannot register variable with empty name";
 
-  // Check if this name is already registered (suppress for array access optimizations)
+  // Check if this name is already registered (suppress for array access and alias optimizations)
   auto it = name_to_cpp_.find(var->name_);
-  if (it != name_to_cpp_.end() && it->second != cpp_name && cpp_name.find('[') == std::string::npos) {
+  if (it != name_to_cpp_.end() && it->second != cpp_name &&
+      cpp_name.find('[') == std::string::npos &&
+      !IsAlias(it->second)) {
     LOG_WARN << "Variable " << var->name_ << " re-registered with different C++ name: " << cpp_name << " vs "
              << it->second;
   }
@@ -44,10 +46,34 @@ void CodeContext::RegisterVar(const ir::VarPtr& var, const std::string& cpp_name
   name_to_cpp_[var->name_] = cpp_name;
 }
 
+void CodeContext::RegisterAlias(const std::string& cpp_name, const std::string& target_name) {
+  // Resolve target through existing alias chain to get canonical name
+  std::string canonical = ResolveAlias(target_name);
+  if (canonical != cpp_name) {  // avoid self-alias
+    alias_map_[cpp_name] = canonical;
+  }
+}
+
+std::string CodeContext::ResolveAlias(const std::string& cpp_name) const {
+  std::string cur = cpp_name;
+  // Follow alias chain (bounded to prevent cycles)
+  for (int depth = 0; depth < 32; ++depth) {
+    auto it = alias_map_.find(cur);
+    if (it == alias_map_.end()) break;
+    cur = it->second;
+  }
+  return cur;
+}
+
+bool CodeContext::IsAlias(const std::string& cpp_name) const {
+  return alias_map_.find(cpp_name) != alias_map_.end();
+}
+
 void CodeContext::Clear() {
   name_to_cpp_.clear();
   tensor_to_pointer_.clear();
   tensor_to_struct_pointer_.clear();
+  alias_map_.clear();
 }
 
 void CodeContext::RegisterPointer(const std::string& tensor_var_name, const std::string& ptr_name) {
