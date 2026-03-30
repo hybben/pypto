@@ -81,7 +81,7 @@ void CodeContext::RegisterPointer(const std::string& tensor_var_name, const std:
   CHECK(!ptr_name.empty()) << "Cannot register pointer with empty pointer name";
 
   auto it = tensor_to_pointer_.find(tensor_var_name);
-  if (it != tensor_to_pointer_.end()) {
+  if (it != tensor_to_pointer_.end() && it->second != ptr_name) {
     LOG_WARN << "Pointer for tensor " << tensor_var_name << " re-registered with: " << ptr_name << " vs "
              << it->second;
   }

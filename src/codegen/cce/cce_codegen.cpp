@@ -404,7 +404,6 @@ void CCECodegen::GenerateSinglePrologue(const ir::FunctionPtr& func, bool has_cr
   }
 
   // Emit GlobalTensors for tensors accessed in Cube section (with Cube access shapes)
-  // Tensors not in cube_shapes but only in vec_shapes get no declaration here (preprocessor skips)
   if (!section_shapes.cube_shapes.empty()) {
     emitter_.EmitLine("#if defined(__DAV_CUBE__)");
     emit_global_tensors(section_shapes.cube_shapes);
@@ -1829,23 +1828,27 @@ class TensorAccessShapeCollector : public ir::IRVisitor {
   void VisitExpr_(const ir::CallPtr& op) override {
     const std::string& op_name = op->op_->name_;
 
-    // Determine tensor arg index and shapes arg index:
-    // block.load / manual.load: tensor at arg[0], shapes at arg[2]
-    // block.store / block.l0c_store / manual.store / manual.l0c_store: tensor at arg[3], shapes at arg[2]
+    // Determine tensor arg index and tile arg index:
+    // block.load: tensor at arg[0], shapes at arg[2], tile at arg[3]
+    // block.store / block.l0c_store: tensor at arg[3], shapes at arg[2], tile at arg[0]
+    // manual.load: tensor at arg[0], tile at arg[2] (no shapes arg)
+    // manual.store / manual.l0c_store: tensor at arg[2], tile at arg[0] (no shapes arg)
     int tensor_arg_idx = -1;
-    int shapes_arg_idx = 2;
-    if (op_name == "block.load" || op_name == "manual.load") {
-      tensor_arg_idx = 0;
-    } else if (op_name == "block.store" || op_name == "block.l0c_store" || op_name == "manual.store" ||
-               op_name == "manual.l0c_store") {
-      tensor_arg_idx = 3;
+    int shapes_arg_idx = -1;
+    int tile_arg_idx = -1;
+    if (op_name == "block.load") {
+      tensor_arg_idx = 0; shapes_arg_idx = 2; tile_arg_idx = 3;
+    } else if (op_name == "manual.load") {
+      tensor_arg_idx = 0; tile_arg_idx = 2;
+    } else if (op_name == "block.store" || op_name == "block.l0c_store") {
+      tensor_arg_idx = 3; shapes_arg_idx = 2; tile_arg_idx = 0;
+    } else if (op_name == "manual.store" || op_name == "manual.l0c_store") {
+      tensor_arg_idx = 2; tile_arg_idx = 0;
     }
 
-    if (tensor_arg_idx >= 0) {
-      INTERNAL_CHECK(op->args_.size() > 2 && tensor_arg_idx < static_cast<int>(op->args_.size()))
-          << "Internal error: " << op_name << " has unexpected argument count: " << op->args_.size();
+    if (tensor_arg_idx >= 0 &&
+        static_cast<int>(op->args_.size()) > tensor_arg_idx) {
       auto tensor_var = std::dynamic_pointer_cast<const ir::Var>(op->args_[tensor_arg_idx]);
-      auto shapes_tuple = std::dynamic_pointer_cast<const ir::MakeTuple>(op->args_[shapes_arg_idx]);
 
       // Select the target map based on current section
       auto& target_map = current_section_.has_value()
@@ -1853,15 +1856,20 @@ class TensorAccessShapeCollector : public ir::IRVisitor {
           : access_shapes_;
 
       if (tensor_var && target_map.find(tensor_var->name_) == target_map.end()) {
-        if (shapes_tuple && !shapes_tuple->elements_.empty()) {
-          target_map[tensor_var->name_] = shapes_tuple->elements_;
-        } else {
-          int tile_idx = (tensor_arg_idx == 0) ? 3 : 0;
-          if (tile_idx < static_cast<int>(op->args_.size())) {
-            auto tile_type = std::dynamic_pointer_cast<const ir::TileType>(op->args_[tile_idx]->GetType());
-            if (tile_type) {
-              target_map[tensor_var->name_] = tile_type->shape_;
-            }
+        bool found = false;
+        // Try explicit shapes tuple first (block.load/store have shapes at arg[2])
+        if (shapes_arg_idx >= 0 && shapes_arg_idx < static_cast<int>(op->args_.size())) {
+          auto shapes_tuple = std::dynamic_pointer_cast<const ir::MakeTuple>(op->args_[shapes_arg_idx]);
+          if (shapes_tuple && !shapes_tuple->elements_.empty()) {
+            target_map[tensor_var->name_] = shapes_tuple->elements_;
+            found = true;
+          }
+        }
+        // Fallback: infer shape from the tile type
+        if (!found && tile_arg_idx >= 0 && tile_arg_idx < static_cast<int>(op->args_.size())) {
+          auto tile_type = std::dynamic_pointer_cast<const ir::TileType>(op->args_[tile_arg_idx]->GetType());
+          if (tile_type) {
+            target_map[tensor_var->name_] = tile_type->shape_;
           }
         }
         // Detect DN layout from manual.load kwargs

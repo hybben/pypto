@@ -445,9 +445,9 @@ def test_fa_perf():
     torch.npu.set_device(device)
     torch.manual_seed(42)
     for sq, skv, d, num_cores in [
-        (128, 128, TD, 1),
+        # (128, 128, TD, 1),
         # (512, 512, TD, 4),
-        # (8192, 8192, TD, 24),
+        (8192, 8192, TD, 24),
     ]:
         print(f"\nFA-Perf ({sq},{skv},{d}) cores={num_cores}  QK_PRELOAD={QK_PRELOAD}")
         q_t = torch.rand((sq, d), device=device, dtype=torch.float16)
