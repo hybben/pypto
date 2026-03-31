@@ -162,6 +162,26 @@ def struct(**kwargs: Any) -> Any:
 
     return SimpleNamespace(**kwargs)
 
+
+def StructArray(size: int, **kwargs: Any) -> Any:
+    """Create a struct array of ``size`` identical structs.
+
+    Args:
+        size: Number of elements in the array.
+        **kwargs: Named fields with initial values (shared by all elements).
+
+    Returns:
+        Struct array that supports dynamic indexing: ``arr[idx].field``.
+
+    Example::
+
+        ctx_arr = pl.StructArray(3, sq_off=0, task_id=0, ki=0)
+        # ctx_arr[task_id].sq_off = sq_off
+    """
+    # The parser handles pl.StructArray() syntactically; this stub exists for
+    # IDE autocompletion and runtime import validation only.
+    return [SimpleNamespace(**kwargs) for _ in range(size)]
+
 # Re-export TensorLayout constants for convenience
 ND = TensorLayout.ND
 DN = TensorLayout.DN

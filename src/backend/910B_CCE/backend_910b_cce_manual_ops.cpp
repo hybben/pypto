@@ -798,25 +798,15 @@ REGISTER_BACKEND_OP(Backend910B_CCE, "struct.declare")
       int size = op->GetKwarg<int>("size");
       std::string fields_csv = op->GetKwarg<std::string>("fields");
 
-      // Parse comma-separated field names
-      std::vector<std::string> field_names;
-      std::istringstream iss(fields_csv);
-      std::string token;
-      while (std::getline(iss, token, ',')) {
-        if (!token.empty()) field_names.push_back(token);
-      }
+      // Deduplicate: same fields → same struct type
+      std::string type_name = codegen.GetOrCreateStructType(fields_csv, arr_name);
 
-      // Emit C++ struct definition
-      std::string type_name = arr_name + "_t";
-      std::string struct_def = "struct " + type_name + " { ";
-      for (const auto& f : field_names) {
-        struct_def += "int64_t " + f + "; ";
+      // Emit variable declaration only (type definition already emitted)
+      if (size == 1) {
+        codegen.Emit(type_name + " " + arr_name + " = {};");
+      } else {
+        codegen.Emit(type_name + " " + arr_name + "[" + std::to_string(size) + "] = {};");
       }
-      struct_def += "};";
-      codegen.Emit(struct_def);
-
-      // Emit array declaration (zero-initialized)
-      codegen.Emit(type_name + " " + arr_name + "[" + std::to_string(size) + "] = {};");
       return std::string("");
     });
 
@@ -825,9 +815,14 @@ REGISTER_BACKEND_OP(Backend910B_CCE, "struct.get")
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
       auto& codegen = dynamic_cast<codegen::CCECodegen&>(codegen_base);
       CHECK(op->args_.size() == 1) << "struct.get requires 1 arg (index)";
-      std::string idx = codegen.GetExprAsCode(op->args_[0]);
       std::string arr_name = op->GetKwarg<std::string>("array");
       std::string field = op->GetKwarg<std::string>("field");
+      // For constant-0 index (single struct), emit "name.field" instead of "name[0].field"
+      auto cint = ir::As<ir::ConstInt>(op->args_[0]);
+      if (cint && cint->value_ == 0) {
+        return arr_name + "." + field;
+      }
+      std::string idx = codegen.GetExprAsCode(op->args_[0]);
       return arr_name + "[" + idx + "]." + field;
     });
 
@@ -836,11 +831,17 @@ REGISTER_BACKEND_OP(Backend910B_CCE, "struct.set")
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
       auto& codegen = dynamic_cast<codegen::CCECodegen&>(codegen_base);
       CHECK(op->args_.size() == 2) << "struct.set requires 2 args (index, value)";
-      std::string idx = codegen.GetExprAsCode(op->args_[0]);
       std::string val = codegen.GetExprAsCode(op->args_[1]);
       std::string arr_name = op->GetKwarg<std::string>("array");
       std::string field = op->GetKwarg<std::string>("field");
-      codegen.Emit(arr_name + "[" + idx + "]." + field + " = " + val + ";");
+      // For constant-0 index (single struct), emit "name.field = val;"
+      auto cint = ir::As<ir::ConstInt>(op->args_[0]);
+      if (cint && cint->value_ == 0) {
+        codegen.Emit(arr_name + "." + field + " = " + val + ";");
+      } else {
+        std::string idx = codegen.GetExprAsCode(op->args_[0]);
+        codegen.Emit(arr_name + "[" + idx + "]." + field + " = " + val + ";");
+      }
       return std::string("");
     });
 

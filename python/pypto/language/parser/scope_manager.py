@@ -138,6 +138,20 @@ class ScopeManager:
                 return scope[name]
         return None
 
+    def lookup_var_bounded(self, name: str, barrier: str = "inline") -> Any | None:
+        """Lookup variable, stopping at the nearest scope of type ``barrier``.
+
+        Used to prevent inline functions from capturing IR variables from the
+        caller's scope. Variables defined within the inline scope (params,
+        locals) are found; variables in outer scopes beyond the barrier are not.
+        """
+        for i in range(len(self.scopes) - 1, -1, -1):
+            if name in self.scopes[i]:
+                return self.scopes[i][name]
+            if self.scope_types[i] == barrier:
+                return None
+        return None
+
     def is_defined(self, name: str) -> bool:
         """Check if variable is defined in any accessible scope.
 

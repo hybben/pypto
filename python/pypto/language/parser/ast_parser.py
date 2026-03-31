@@ -557,42 +557,90 @@ class ASTParser:
                     if isinstance(func, ast.Attribute) and func.attr == "struct":
                         struct_var = self._parse_struct_call(stmt.value, var_name)
                         self.scope_manager.define_python_var(var_name, struct_var, span=span)
-                        return
-                # Check if RHS is a list/tuple of struct variables → _StructArrayVar
-                if isinstance(stmt.value, (ast.List, ast.Tuple)) and len(stmt.value.elts) >= 2:
-                    structs: list[_StructVar] = []
-                    all_structs = True
-                    for elt in stmt.value.elts:
-                        if isinstance(elt, ast.Name):
-                            obj = self.scope_manager.get_python_var(elt.id)
-                            if obj is None:
-                                obj = self.scope_manager.lookup_var(elt.id)
-                            if isinstance(obj, _StructVar):
-                                structs.append(obj)
-                                continue
-                        all_structs = False
-                        break
-                    if all_structs and structs:
-                        # Validate homogeneous field names
-                        ref_fields = set(structs[0].fields.keys())
-                        for i, s in enumerate(structs[1:], 1):
-                            if set(s.fields.keys()) != ref_fields:
-                                raise ParserTypeError(
-                                    f"Struct array element {i} has different fields than element 0",
-                                    span=span,
-                                    hint=f"All structs must have the same fields: {sorted(ref_fields)}",
-                                )
-                        struct_arr = _StructArrayVar(structs, name=var_name)
-                        self.scope_manager.define_python_var(var_name, struct_arr, span=span)
-                        # Emit struct.declare IR call for CCE codegen
-                        fields_csv = ",".join(struct_arr.field_names)
+                        # Emit struct.declare for C++ struct codegen
+                        fields_csv = ",".join(struct_var.fields.keys())
                         decl_call = ir.create_op_call(
                             "struct.declare", [],
-                            {"array": var_name, "size": len(structs), "fields": fields_csv},
+                            {"array": var_name, "size": 1, "fields": fields_csv},
                             span,
                         )
                         self.builder.emit(ir.EvalStmt(decl_call, span))
+                        # Emit struct.set for non-zero init values
+                        idx_zero = ir.ConstInt(0, DataType.INDEX, span)
+                        for fname, fval in struct_var.fields.items():
+                            if isinstance(fval, ir.Expr):
+                                # Skip trivial zero inits
+                                if isinstance(fval, ir.ConstInt) and fval.value == 0:
+                                    continue
+                                init_call = ir.create_op_call(
+                                    "struct.set", [idx_zero, fval],
+                                    {"array": var_name, "field": fname}, span,
+                                )
+                                self.builder.emit(ir.EvalStmt(init_call, span))
                         return
+                    # pl.StructArray(N, field1=val1, field2=val2, ...)
+                    if isinstance(func, ast.Attribute) and func.attr == "StructArray":
+                        sa_call = stmt.value
+                        if not sa_call.args or not isinstance(sa_call.args[0], ast.Constant):
+                            raise ParserSyntaxError(
+                                "pl.StructArray() requires an integer size as first argument",
+                                span=span,
+                                hint="Use pl.StructArray(3, field1=0, field2=0, ...)",
+                            )
+                        arr_size = sa_call.args[0].value
+                        if not isinstance(arr_size, int) or arr_size < 1:
+                            raise ParserSyntaxError(
+                                f"pl.StructArray() size must be a positive integer, got {arr_size}",
+                                span=span,
+                            )
+                        # Parse field kwargs
+                        fields: dict[str, Any] = {}
+                        for kw in sa_call.keywords:
+                            if kw.arg is None:
+                                raise ParserSyntaxError("pl.StructArray() does not support **kwargs", span=span)
+                            fields[kw.arg] = self.parse_expression(kw.value)
+                        if not fields:
+                            raise ParserSyntaxError("pl.StructArray() requires at least one field", span=span)
+
+                        # Create _StructArrayVar with dummy _StructVar slots (for field validation)
+                        structs = [_StructVar(dict(fields), name=f"{var_name}_{i}") for i in range(arr_size)]
+                        struct_arr = _StructArrayVar(structs, name=var_name)
+                        self.scope_manager.define_python_var(var_name, struct_arr, span=span)
+
+                        # Emit struct.declare
+                        fields_csv = ",".join(fields.keys())
+                        decl_call = ir.create_op_call(
+                            "struct.declare", [],
+                            {"array": var_name, "size": arr_size, "fields": fields_csv},
+                            span,
+                        )
+                        self.builder.emit(ir.EvalStmt(decl_call, span))
+
+                        # Emit struct.set for non-zero init values (applied to all elements)
+                        for slot in range(arr_size):
+                            idx_expr = ir.ConstInt(slot, DataType.INDEX, span)
+                            for fname, fval in fields.items():
+                                if isinstance(fval, ir.Expr):
+                                    if isinstance(fval, ir.ConstInt) and fval.value == 0:
+                                        continue
+                                    init_call = ir.create_op_call(
+                                        "struct.set", [idx_expr, fval],
+                                        {"array": var_name, "field": fname}, span,
+                                    )
+                                    self.builder.emit(ir.EvalStmt(init_call, span))
+                        return
+                # Check if RHS is a list/tuple containing struct variables → error (use StructArray)
+                if isinstance(stmt.value, (ast.List, ast.Tuple)) and stmt.value.elts:
+                    for elt in stmt.value.elts:
+                        if isinstance(elt, ast.Name):
+                            obj = self.scope_manager.get_python_var(elt.id)
+                            if isinstance(obj, _StructVar):
+                                raise ParserSyntaxError(
+                                    f"Putting pl.struct into a list/tuple is not supported. "
+                                    f"Use pl.StructArray(N, field=val, ...) instead.",
+                                    span=self.span_tracker.get_span(elt),
+                                    hint=f"Example: {var_name} = pl.StructArray(N, field1=0, field2=0)",
+                                )
                 # Check if RHS is a struct array subscript: ctx_curr = ctx_arr[task_id]
                 # Store as a _DynamicStructView alias and emit struct.ref for C++ reference
                 if isinstance(stmt.value, ast.Subscript) and isinstance(stmt.value.value, ast.Name):
@@ -696,8 +744,16 @@ class ASTParser:
                             hint=f"Available fields: {', '.join(obj.fields.keys())}",
                         )
                     value_expr = self.parse_expression(stmt.value)
-                    # Emit IR variable reassignment so codegen sees it
-                    if isinstance(value_expr, ir.Expr):
+                    if obj.name and isinstance(value_expr, ir.Expr):
+                        # Named struct with C++ codegen — use struct.set
+                        idx_zero = ir.ConstInt(0, DataType.INDEX, span)
+                        call = ir.create_op_call(
+                            "struct.set", [idx_zero, value_expr],
+                            {"array": obj.name, "field": field_name}, span,
+                        )
+                        self.builder.emit(ir.EvalStmt(call, span))
+                    elif isinstance(value_expr, ir.Expr):
+                        # Unnamed struct — fallback to IR variable
                         ir_name = f"_{obj.name}_{field_name}" if obj.name else field_name
                         var = self.builder.let(ir_name, value_expr, span=span)
                         obj.fields[field_name] = var
@@ -1846,7 +1902,23 @@ class ASTParser:
         if python_var is not None:
             return python_var
 
-        var = self.scope_manager.lookup_var(var_name)
+        # In inline mode, restrict IR variable lookup to the inline scope only.
+        # Variables from the caller's scope must be passed as function arguments.
+        # Exception: tile buffers (TileType, TupleType, TensorType) are allowed
+        # from outer scope since they represent hardware resources, not scalars.
+        if self._inline_mode:
+            var = self.scope_manager.lookup_var_bounded(var_name, barrier="inline")
+            if var is None:
+                # Check if the variable exists in outer scope and is a tile/tensor/tuple
+                outer_var = self.scope_manager.lookup_var(var_name)
+                if outer_var is not None and hasattr(outer_var, "type"):
+                    vtype = outer_var.type
+                    if (isinstance(vtype, ir.TileType)
+                            or isinstance(vtype, ir.TupleType)
+                            or isinstance(vtype, ir.TensorType)):
+                        var = outer_var
+        else:
+            var = self.scope_manager.lookup_var(var_name)
 
         if var is not None:
             return var
@@ -2553,13 +2625,16 @@ class ASTParser:
                     span=span,
                 )
             value_expr = self.parse_expression(kw.value)
-            # Emit IR variable so codegen can track reassignments
-            if isinstance(value_expr, ir.Expr):
-                ir_name = f"_{struct_name}_{kw.arg}" if struct_name else kw.arg
+            if struct_name:
+                # Named struct: fields will use struct.get/set via C++ struct.
+                # Don't emit IR variables — just record field names for validation.
+                fields[kw.arg] = value_expr  # keep for validation only
+            elif isinstance(value_expr, ir.Expr):
+                # Unnamed struct: emit IR variable for codegen tracking
+                ir_name = kw.arg
                 var = self.builder.let(ir_name, value_expr, span=span)
                 fields[kw.arg] = var
             else:
-                # Non-IR values (tuples, Python objects) stay as-is
                 fields[kw.arg] = value_expr
         return _StructVar(fields, name=struct_name)
 
@@ -3637,6 +3712,13 @@ class ASTParser:
                         f"Struct '{obj_name}' has no field '{field_name}'",
                         span=span,
                         hint=f"Available fields: {', '.join(obj.fields.keys())}",
+                    )
+                if obj.name:
+                    # Named struct with C++ codegen — use struct.get
+                    idx_zero = ir.ConstInt(0, DataType.INDEX, span)
+                    return ir.create_op_call(
+                        "struct.get", [idx_zero],
+                        {"array": obj.name, "field": field_name}, span,
                     )
                 return obj.fields[field_name]
             # _DynamicStructView: struct array view passed as function argument

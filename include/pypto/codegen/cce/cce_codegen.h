@@ -137,6 +137,12 @@ class CCECodegen : public CodegenBase {
    */
   void RegisterOutputTensorStruct(const std::string& output_var_name, const std::string& tensor_var_name);
 
+  /**
+   * @brief Get or create a C++ struct type for the given field signature.
+   * Deduplicates identical structs: same fields → same type name.
+   */
+  std::string GetOrCreateStructType(const std::string& fields_csv, const std::string& hint_name);
+
  protected:
   // Override visitor methods for code generation - Statements
   void VisitStmt_(const ir::AssignStmtPtr& op) override;
@@ -272,6 +278,18 @@ class CCECodegen : public CodegenBase {
   std::string FormatAddressHex(int64_t addr);
 
   /**
+   * @brief Get or create a C++ struct type for the given field signature.
+   *
+   * Deduplicates identical structs: same fields → same type name.
+   * The struct type definition is emitted once (on first encounter).
+   *
+   * @param fields_csv Comma-separated field names (dedup key)
+   * @param hint_name Name hint for the type (used if this is the first struct with these fields)
+   * @return The canonical type name (e.g., "ctx_t")
+   */
+  void PreEmitStructTypes(const ir::StmtPtr& body);
+
+  /**
    * @brief Generate CCE kernel C++ code for a single function
    *
    * Emits function prologue (signature, argument unpacking, type declarations)
@@ -372,6 +390,10 @@ class CCECodegen : public CodegenBase {
   std::map<std::string, std::string> emitted_tile_types_;
 
   bool section_snapshot_saved_ = false;  ///< Whether context snapshot has been saved before first section
+
+  /// Struct type dedup: maps field signature (CSV) → type name.
+  /// Identical structs share the same type definition.
+  std::map<std::string, std::string> struct_type_defs_;
 };
 
 }  // namespace codegen

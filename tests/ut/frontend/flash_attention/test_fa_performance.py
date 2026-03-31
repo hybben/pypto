@@ -178,7 +178,7 @@ def compute_qk(ctx):
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE1, event_id=event_ids_01[ctx.l0ab_idx])
-    plm.l0c_store(acc_buf[ctx.l0c_idx], [qk_fifo_slot * sq_dim + ctx.sq_off, skv_off], [TS, TKV], qk_buf)
+    plm.l0c_store(acc_buf[ctx.l0c_idx], [qk_fifo_slot * ctx.sq_dim + ctx.sq_off, skv_off], [TS, TKV], qk_buf)
     pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=event_ids_01[ctx.l0c_idx])
     ctx.l0ab_idx = 1 - ctx.l0ab_idx
     ctx.l0c_idx = 1 - ctx.l0c_idx
@@ -191,12 +191,12 @@ def compute_pv(ctx):
     q_mat_idx = ctx.q_count % 2
     pv_task_slot = ctx.task_id % FIFO_SIZE
     sv_off = ctx.ki * TKV
-    pv_fifo_slot = ctx.task_id % FIFO_SIZE  # for p_buf read
+    pv_fifo_slot = ctx.task_id % FIFO_SIZE
 
     pl.system.sync_dst(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.MTE2, event_id=event_ids_23[ctx.buf_idx])
     plm.load(v_mat_buf[ctx.buf_idx], v, [sv_off, 0])
     pl.system.wait_cross_core(pipe=pl.PipeType.M, event_id=P_READY_IDS[pv_fifo_slot], max_event_id=P_MAX_EID)
-    plm.load(p_mat_buf[ctx.buf_idx], p_buf, [pv_fifo_slot * sq_dim + ctx.sq_off, sv_off])
+    plm.load(p_mat_buf[ctx.buf_idx], p_buf, [pv_fifo_slot * ctx.sq_dim + ctx.sq_off, sv_off])
     pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=0)
 
@@ -227,11 +227,8 @@ def compute_pv(ctx):
 #  These access tiles from the outer kernel scope via closure.
 # ================================================================
 @pl.inline
-def softmax_body(ctx):
-    """Softmax body (no cross-core sync, no store). Uses row_off from closure.
-    On a2/a3 with 2 sub-blocks, each sub-block handles half the 64-row tile.
-    Both sub-blocks share row_off, so they jointly cover rows [row_off, row_off+64).
-    """
+def softmax_body(ctx, sq_dim, sq_off, row_off):
+    """Softmax body. All non-tile, non-constant vars passed as args."""
     p_fifo_slot = ctx.task_id % FIFO_SIZE
     skv_off = ctx.ki * TKV
     plm.load(qk_vec, qk_buf, [p_fifo_slot * sq_dim + sq_off + row_off, skv_off])
@@ -276,17 +273,17 @@ def softmax_body(ctx):
 
 
 @pl.inline
-def compute_p(ctx):
-    """Softmax on QK tile → P. Uses row_off from closure. Includes cross-core sync."""
+def compute_p(ctx, sq_dim, sq_off, row_off):
+    """Softmax on QK tile → P. Includes cross-core sync."""
     p_fifo_slot = ctx.task_id % FIFO_SIZE
     pl.system.wait_cross_core(pipe=pl.PipeType.V, event_id=QK_READY_IDS[p_fifo_slot], max_event_id=QK_MAX_EID)
-    softmax_body(ctx)
+    softmax_body(ctx, sq_dim, sq_off, row_off)
     pl.system.set_cross_core(pipe=pl.PipeType.MTE3, event_id=P_READY_IDS[p_fifo_slot], max_event_id=P_MAX_EID)
     return
 
 
-def compute_gu(ctx):
-    """GU: running output update. Uses row_off from closure. Includes cross-core sync."""
+def compute_gu(ctx, row_off):
+    """GU: running output update. Includes cross-core sync."""
     q_mat_idx = ctx.q_count % 2
     pv_slot = ctx.task_id % FIFO_SIZE
     row_offset = ctx.sub_id * TS_HALF
@@ -296,11 +293,10 @@ def compute_gu(ctx):
         pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
         pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
     if ctx.ki > 0:
-        gu_fifo_slot = ctx.task_id % FIFO_SIZE
         plm.load(pv_vec, pv_buf, [ctx.core_id * PV_CORE_STRIDE + q_mat_idx * FIFO_SIZE * TS + pv_slot * TS + row_offset, 0])
         pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
         pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
-        plm.row_expand_mul(running_o, running_o, exp_corr_fifo[gu_fifo_slot])
+        plm.row_expand_mul(running_o, running_o, exp_corr_fifo[pv_slot])
         plm.add(running_o, running_o, pv_vec)
     return
 
@@ -339,7 +335,7 @@ def fa_perf_tkv_kernel(
         pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=0)
         pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=1)
 
-        ctx = pl.struct(sq_off=0, task_id=0, qi = 0, ki = 0, q_count=0, buf_idx=0, l0ab_idx=0, l0c_idx=0, core_id=core_id)
+        ctx = pl.struct(sq_off=0, task_id=0, qi = 0, ki = 0, q_count=0, buf_idx=0, l0ab_idx=0, l0c_idx=0, core_id=core_id, sq_dim=sq_dim)
         for qi in pl.range(core_id, sq_tiles, num_cores):
             ctx.sq_off = qi * TS
             ctx.qi = qi
@@ -408,8 +404,8 @@ def fa_perf_tkv_kernel(
             # ---- Main loop: P[ki+preload] ahead + GU[ki] current ----
             for ki in pl.range(0, skv_tiles):
                 ctx.ki = ki
-                compute_p(ctx)
-                compute_gu(ctx)
+                compute_p(ctx, sq_dim, sq_off, row_off)
+                compute_gu(ctx, row_off)
                 ctx.task_id = ctx.task_id + 1
             ctx.q_count = ctx.q_count + 1
 

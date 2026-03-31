@@ -212,6 +212,13 @@ std::string CCECodegen::GenerateSingle(const ir::ProgramPtr& program, const std:
   // Emit header (single-file mode: no tensor.h)
   emitter_.EmitLine(KERNEL_HEADER_SINGLE);
 
+  // Pre-scan: collect and emit struct type definitions before the function
+  struct_type_defs_.clear();
+  PreEmitStructTypes(kernel_func->body_);
+  if (!struct_type_defs_.empty()) {
+    emitter_.EmitLine("");
+  }
+
   // Generate prologue and body
   GenerateSinglePrologue(kernel_func, needs_ffts);
   section_snapshot_saved_ = false;
@@ -2029,6 +2036,78 @@ std::string CCECodegen::FormatAddressHex(int64_t addr) {
   std::ostringstream oss;
   oss << "0x" << std::hex << addr;
   return oss.str();
+}
+
+std::string CCECodegen::GetOrCreateStructType(const std::string& fields_csv,
+                                               const std::string& hint_name) {
+  auto it = struct_type_defs_.find(fields_csv);
+  if (it != struct_type_defs_.end()) {
+    return it->second;  // Already defined — reuse type name
+  }
+
+  // New struct type: register (definition already emitted by PreEmitStructTypes)
+  std::string type_name = hint_name + "_t";
+  struct_type_defs_[fields_csv] = type_name;
+  return type_name;
+}
+
+namespace {
+// Recursively scan IR for struct.declare calls and collect field signatures
+void CollectStructDeclares(const ir::StmtPtr& stmt,
+                           std::vector<std::pair<std::string, std::string>>& out) {
+  if (!stmt) return;
+  if (auto seq = ir::As<ir::SeqStmts>(stmt)) {
+    for (const auto& s : seq->stmts_) CollectStructDeclares(s, out);
+  } else if (auto eval = ir::As<ir::EvalStmt>(stmt)) {
+    if (auto call = ir::As<ir::Call>(eval->expr_)) {
+      if (call->op_ && call->op_->name_ == "struct.declare") {
+        std::string fields = call->GetKwarg<std::string>("fields");
+        std::string name = call->GetKwarg<std::string>("array");
+        out.emplace_back(fields, name);
+      }
+    }
+  } else if (auto for_stmt = ir::As<ir::ForStmt>(stmt)) {
+    CollectStructDeclares(for_stmt->body_, out);
+  } else if (auto if_stmt = ir::As<ir::IfStmt>(stmt)) {
+    CollectStructDeclares(if_stmt->then_body_, out);
+    if (if_stmt->else_body_) CollectStructDeclares(*if_stmt->else_body_, out);
+  } else if (auto section = ir::As<ir::SectionStmt>(stmt)) {
+    CollectStructDeclares(section->body_, out);
+  }
+}
+}  // namespace
+
+void CCECodegen::PreEmitStructTypes(const ir::StmtPtr& body) {
+  std::vector<std::pair<std::string, std::string>> declares;
+  CollectStructDeclares(body, declares);
+  // Track used type names to avoid collision when different field sets share a hint name
+  std::set<std::string> used_type_names;
+  for (const auto& [fields_csv, hint_name] : declares) {
+    if (struct_type_defs_.count(fields_csv)) continue;
+    std::string type_name = hint_name + "_t";
+    // Ensure uniqueness: if type_name is taken by a different field set, add suffix
+    if (used_type_names.count(type_name)) {
+      int suffix = 1;
+      while (used_type_names.count(type_name + "_" + std::to_string(suffix))) suffix++;
+      type_name = type_name + "_" + std::to_string(suffix);
+    }
+    struct_type_defs_[fields_csv] = type_name;
+    used_type_names.insert(type_name);
+
+    // Parse fields and emit struct definition
+    std::vector<std::string> field_names;
+    std::istringstream iss(fields_csv);
+    std::string token;
+    while (std::getline(iss, token, ',')) {
+      if (!token.empty()) field_names.push_back(token);
+    }
+    std::string def = "struct " + type_name + " { ";
+    for (const auto& f : field_names) {
+      def += "int64_t " + f + "; ";
+    }
+    def += "};";
+    emitter_.EmitLine(def);
+  }
 }
 
 void CCECodegen::GenerateTileTypeDeclaration(const std::string& var_name, const ir::TileTypePtr& tile_type) {
