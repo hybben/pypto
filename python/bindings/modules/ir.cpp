@@ -332,24 +332,33 @@ void BindIR(nb::module_& m) {
       .value("min", TilePad::min, "Min value padding")
       .export_values();
 
+  // CompactMode enum - must be before TileView
+  nb::enum_<CompactMode>(ir, "CompactMode", "Compact mode for tile buffer")
+      .value("null",         CompactMode::null,         "No compact mode")
+      .value("normal",       CompactMode::normal,       "Normal compact mode")
+      .value("row_plus_one", CompactMode::row_plus_one, "Row plus one compact mode")
+      .export_values();
+
   // TileView - struct for tile view information
   nb::class_<TileView>(
       ir, "TileView",
       "Tile view representation with valid shape, stride, start offset, layouts, fractal, and pad")
       .def(nb::init<>(), "Create an empty tile view")
       .def(nb::init<const std::vector<ExprPtr>&, const std::vector<ExprPtr>&, ExprPtr, TileLayout, TileLayout,
-                    uint64_t, TilePad>(),
+                    uint64_t, TilePad, CompactMode>(),
            nb::arg("valid_shape"), nb::arg("stride"), nb::arg("start_offset"),
            nb::arg("blayout") = TileLayout::row_major, nb::arg("slayout") = TileLayout::none_box,
            nb::arg("fractal") = static_cast<uint64_t>(512), nb::arg("pad") = TilePad::null,
-           "Create a tile view with valid_shape, stride, start_offset, blayout, slayout, fractal, and pad")
+           nb::arg("compact") = CompactMode::null,
+           "Create a tile view with valid_shape, stride, start_offset, blayout, slayout, fractal, pad, and compact")
       .def_rw("valid_shape", &TileView::valid_shape, "Valid shape dimensions")
       .def_rw("stride", &TileView::stride, "Stride for each dimension")
       .def_rw("start_offset", &TileView::start_offset, "Starting offset")
       .def_rw("blayout", &TileView::blayout, "Block layout")
       .def_rw("slayout", &TileView::slayout, "Scatter layout")
       .def_rw("fractal", &TileView::fractal, "Fractal size")
-      .def_rw("pad", &TileView::pad, "Pad mode");
+      .def_rw("pad", &TileView::pad, "Pad mode")
+      .def_rw("compact", &TileView::compact, "Compact mode");
 
   // Dynamic dimension constant
   ir.attr("DYNAMIC_DIM") = kDynamicDim;

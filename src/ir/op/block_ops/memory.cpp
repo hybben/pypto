@@ -275,6 +275,11 @@ TypePtr DeduceBlockCreateTileType(const std::vector<ExprPtr>& args,
   if (pad >= 0) {
     tile_view.pad = static_cast<TilePad>(pad);
   }
+
+  int compact = GetKwarg<int>(kwargs, "compact", -1);
+  if (compact >= 0) {
+    tile_view.compact = static_cast<CompactMode>(compact);
+  }
   // If explicit memref kwargs are provided (addr + size + id), attach a MemRef to the TileType.
   // This allows the PTO codegen to emit pto.alloc_tile with base_addr directly from the IR,
   // without requiring the init_memref pass.
@@ -402,6 +407,7 @@ REGISTER_OP("block.make_tile")
     .set_attr<int>("slayout")
     .set_attr<int>("fractal")
     .set_attr<int>("pad")
+    .set_attr<int>("compact")
     .f_deduce_type([](const std::vector<ExprPtr>& args,
                       const std::vector<std::pair<std::string, std::any>>& kwargs) {
       return DeduceBlockCreateTileType(args, kwargs, "block.make_tile");

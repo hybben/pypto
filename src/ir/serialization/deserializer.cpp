@@ -253,6 +253,18 @@ class IRDeserializer::Impl : public detail::DeserializerContext {
         } else {
           CHECK(false) << "Unknown TilePad: " << pad_str;
         }
+      } else if (key == "compact") {
+        std::string compact_str;
+        p->val.convert(compact_str);
+        if (compact_str == "null") {
+          tile_view.compact = CompactMode::null;
+        } else if (compact_str == "normal") {
+          tile_view.compact = CompactMode::normal;
+        } else if (compact_str == "row_plus_one") {
+          tile_view.compact = CompactMode::row_plus_one;
+        } else {
+          CHECK(false) << "Unknown CompactMode: " << compact_str;
+        }
       }
     }
 

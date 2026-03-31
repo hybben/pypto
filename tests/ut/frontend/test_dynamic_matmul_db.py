@@ -31,7 +31,7 @@ M = pl.DynVar('M')
 K = pl.DynVar('K')
 N = pl.DynVar('N')
 
-@fe.kernel(auto_sync=True)
+@fe.kernel
 # @fe.kernel
 def dynamic_matmul_db_kernel(
     a: pl.Tensor[[M, K], pl.FP16],
@@ -46,6 +46,7 @@ def dynamic_matmul_db_kernel(
         blayout=2,
         slayout=1,
         valid_shape=[-1, -1],
+        compact = 1,
     )
     tile_a_load_ping = plm.make_tile(tile_type_a_load, addr=0x00000, size=32768)
     tile_a_load_pong = plm.make_tile(tile_type_a_load, addr=0x10000, size=32768)
@@ -57,6 +58,7 @@ def dynamic_matmul_db_kernel(
         blayout=2,
         slayout=1,
         valid_shape=[-1, -1],
+        compact = 1,
     )
     tile_b_load_ping = plm.make_tile(tile_type_b_load, addr=0x08000, size=32768)
     tile_b_load_pong = plm.make_tile(tile_type_b_load, addr=0x18000, size=32768)
@@ -69,6 +71,7 @@ def dynamic_matmul_db_kernel(
         blayout=1,
         slayout=1,
         valid_shape=[-1, -1],
+        compact = 1,
     )
     tile_a_ping = plm.make_tile(tile_type_a_compute, addr=0x00000, size=32768)
     tile_a_pong = plm.make_tile(tile_type_a_compute, addr=0x08000, size=32768)
@@ -80,6 +83,7 @@ def dynamic_matmul_db_kernel(
         blayout=1,
         slayout=2,
         valid_shape=[-1, -1],
+        compact = 1,
     )
     tile_b_ping = plm.make_tile(tile_type_b_compute, addr=0x00000, size=32768)
     tile_b_pong = plm.make_tile(tile_type_b_compute, addr=0x08000, size=32768)
@@ -93,6 +97,7 @@ def dynamic_matmul_db_kernel(
         slayout=1,
         fractal=1024,
         valid_shape=[-1, -1],
+        compact = 1,
     )
     tile_c = plm.make_tile(tile_type_c, addr=0x00000, size=65536)
 
@@ -110,53 +115,55 @@ def dynamic_matmul_db_kernel(
         # Event-id tuples: index 0 = ping, index 1 = pong.
         # Different (set_pipe, wait_pipe) combinations have independent event_id
         # namespaces (0–7 each), so the same values 0/1 are reused across combos.
-        # event_ids = (0, 1)
+        event_ids = (0, 1)
 
         for i in pl.range(0, M_dim, 128):
             for j in pl.range(0, N_dim, 128):
                 m_size = pl.min(M_dim - i, 128)
                 n_size = pl.min(N_dim - j, 128)
-
+                plm.set_validshape(tile_c, m_size, n_size)
                 for k in pl.range(0, K_dim, 128):
                     k_size = pl.min(K_dim - k, 128)
+                    # buf_idx cycles 0 (ping) / 1 (pong) each k-iteration.
+                    # Both tile access and event_id selection use the same index,
+                    # lowered to an if-else chain by the variable-index feature.
                     buf_idx = (k // 128) % 2
 
                     plm.set_validshape(tile_a_load_buf[buf_idx], m_size, k_size)
-                    plm.load(tile_a_load_buf[buf_idx], a, [i, k])
+                    plm.set_validshape(tile_a_buf[buf_idx], m_size, k_size)
                     plm.set_validshape(tile_b_load_buf[buf_idx], k_size, n_size)
+                    plm.set_validshape(tile_b_buf[buf_idx], k_size, n_size)
+
+                    plm.load(tile_a_load_buf[buf_idx], a, [i, k])
                     plm.load(tile_b_load_buf[buf_idx], b, [k, j])
 
                     # (MTE2, MTE1) — load done, move can start
-                    # pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=event_ids[buf_idx])
-                    # pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=event_ids[buf_idx])
+                    pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=event_ids[buf_idx])
+                    pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=event_ids[buf_idx])
 
-                    plm.set_validshape(tile_a_buf[buf_idx], m_size, k_size)
                     plm.move(tile_a_buf[buf_idx], tile_a_load_buf[buf_idx])
-                    plm.set_validshape(tile_b_buf[buf_idx], k_size, n_size)
                     plm.move(tile_b_buf[buf_idx], tile_b_load_buf[buf_idx])
 
                     # (MTE1, M) — move done, matmul can start
-                    # pl.system.sync_src(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.M, event_id=event_ids[buf_idx])
-                    # pl.system.sync_dst(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.M, event_id=event_ids[buf_idx])
+                    pl.system.sync_src(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.M, event_id=event_ids[buf_idx])
+                    pl.system.sync_dst(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.M, event_id=event_ids[buf_idx])
 
                     if k == 0:
-                        plm.set_validshape(tile_c, m_size, n_size)
                         plm.matmul(tile_c, tile_a_buf[buf_idx], tile_b_buf[buf_idx])
                     else:
                         plm.matmul_acc(tile_c, tile_c, tile_a_buf[buf_idx], tile_b_buf[buf_idx])
 
                     # (M, MTE2) — matmul done, next iteration's load can start
-                    # pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE2, event_id=event_ids[buf_idx])
-                    # pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE2, event_id=event_ids[buf_idx])
+                    pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE2, event_id=event_ids[buf_idx])
+                    pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE2, event_id=event_ids[buf_idx])
 
                 # Store result after all k-tiles are accumulated
-                # pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
-                # pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
-                # plm.l0c_store(tile_c, [i, j], [128, 128], c)
+                pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
+                pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
                 plm.store(c, tile_c, [i, j])
 
                 # Barrier to ensure l0c_store is complete before next (i, j) iteration
-                # pl.system.bar_all()
+                pl.system.bar_all()
 
     return c
 
@@ -178,6 +185,7 @@ def test_dynamic_matmul_db():
         [2048, 128, 2048],
         [96, 384, 192],
         [160, 256, 96],
+        [999, 888, 777],
     ]
     torch.manual_seed(0)
 

@@ -59,6 +59,7 @@ def make_tile(
     slayout: Optional[int] = None,
     fractal: Optional[int] = None,
     pad: Optional[int] = None,
+    compact: Optional[int] = None,
     span: Span | None = None,
 ) -> Call:
     """Create a tile from a shape.
@@ -90,6 +91,7 @@ def make_tile(
         "slayout": slayout,
         "fractal": fractal,
         "pad": pad,
+        "compact": compact,
     }
     kwargs = {k: v for k, v in kwargs.items() if v is not None}
     if addr is not None:

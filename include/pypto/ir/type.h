@@ -214,6 +214,21 @@ enum class TilePad {
 };
 
 /**
+ * @brief Compact mode enumeration for tile buffer
+ *
+ * Defines the compact mode for tile buffers, used to handle tail-block scenarios
+ * where L0A/L0B split layouts are non-contiguous:
+ * - null: No compact mode (default)
+ * - normal: Normal compact mode
+ * - row_plus_one: Row plus one compact mode
+ */
+enum class CompactMode {
+  null,         ///< No compact mode (default)
+  normal,       ///< Normal compact mode
+  row_plus_one  ///< Row plus one compact mode
+};
+
+/**
  * @brief Tile view representation
  *
  * Represents the view information for a tile, including valid shape,
@@ -229,6 +244,7 @@ struct TileView {
   TileLayout slayout = TileLayout::none_box;   ///< Scatter layout
   uint64_t fractal = 512;                      ///< Fractal size
   TilePad pad = TilePad::null;                 ///< Pad mode
+  CompactMode compact = CompactMode::null;     ///< Compact mode
 
   /**
    * @brief Default constructor for aggregate initialization
@@ -245,17 +261,19 @@ struct TileView {
    * @param slayout Scatter layout
    * @param fractal Fractal size
    * @param pad Pad mode
+   * @param compact Compact mode
    */
   TileView(std::vector<ExprPtr> valid_shape, std::vector<ExprPtr> stride, ExprPtr start_offset,
            TileLayout blayout = TileLayout::row_major, TileLayout slayout = TileLayout::none_box,
-           uint64_t fractal = 512, TilePad pad = TilePad::null)
+           uint64_t fractal = 512, TilePad pad = TilePad::null, CompactMode compact = CompactMode::null)
       : valid_shape(std::move(valid_shape)),
         stride(std::move(stride)),
         start_offset(std::move(start_offset)),
         blayout(blayout),
         slayout(slayout),
         fractal(fractal),
-        pad(pad) {}
+        pad(pad),
+        compact(compact) {}
 
   /**
    * @brief Get field descriptors for reflection-based visitation
@@ -269,7 +287,8 @@ struct TileView {
                            reflection::UsualField(&TileView::blayout, "blayout"),
                            reflection::UsualField(&TileView::slayout, "slayout"),
                            reflection::UsualField(&TileView::fractal, "fractal"),
-                           reflection::UsualField(&TileView::pad, "pad"));
+                           reflection::UsualField(&TileView::pad, "pad"),
+                           reflection::UsualField(&TileView::compact, "compact"));
   }
 };
 

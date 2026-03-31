@@ -64,6 +64,7 @@ class TileType:
             Auto-filled per memory space if omitted.
         fractal: Fractal size (optional). Auto-filled: 512 for FP16, 1024 for FP32 ACC.
         pad: Pad mode (0=null, 1=zero, 2=max, 3=min, optional).
+        compact: Compact mode (0=null, 1=normal, 2=row_plus_one, optional).
     """
     shape: Sequence[int] | _ir_core.MakeTuple
     dtype: DataType
@@ -73,6 +74,7 @@ class TileType:
     slayout: Optional[int] = None
     fractal: Optional[int] = None
     pad: Optional[int] = None
+    compact: Optional[int] = None
 
     def __post_init__(self):
         _apply_default_layout(self)
@@ -194,7 +196,8 @@ def make_tile(
         blayout=tile_type.blayout,
         slayout=tile_type.slayout,
         fractal=tile_type.fractal,
-        pad=tile_type.pad))
+        pad=tile_type.pad,
+        compact=tile_type.compact))
 
 
 # ---------------------------------------------------------------------------

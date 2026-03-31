@@ -280,6 +280,7 @@ static std::string MakePrintCodegenPTO(const std::string& pto_op_name, const Cal
     ir::TileLayout slayout = ir::TileLayout::none_box;
     uint64_t fractal = 512;
     ir::TilePad pad = ir::TilePad::null;
+    ir::CompactMode compact = ir::CompactMode::null;
     if (tile_type->tile_view_.has_value()) {
       const auto& tile_view = tile_type->tile_view_.value();
       if (tile_view.valid_shape.size() == 2) {
@@ -290,6 +291,7 @@ static std::string MakePrintCodegenPTO(const std::string& pto_op_name, const Cal
       slayout = tile_view.slayout;
       fractal = tile_view.fractal;
       pad = tile_view.pad;
+      compact = tile_view.compact;
     }
     if (shapes_tuple != nullptr) {
       rows = get_const_or_default(shapes_tuple->elements_[0], rows);
@@ -312,7 +314,11 @@ static std::string MakePrintCodegenPTO(const std::string& pto_op_name, const Cal
     oss << ", v_row=" << v_row << ", v_col=" << v_col;
     oss << ", blayout=" << tile_layout_to_str(blayout);
     oss << ", slayout=" << tile_layout_to_str(slayout);
-    oss << ", fractal=" << fractal << ", pad=" << static_cast<int>(pad) << ">";
+    oss << ", fractal=" << fractal << ", pad=" << static_cast<int>(pad);
+    if (compact != ir::CompactMode::null) {
+      oss << ", compact=" << static_cast<int>(compact);
+    }
+    oss << ">";
     return oss.str();
   };
 

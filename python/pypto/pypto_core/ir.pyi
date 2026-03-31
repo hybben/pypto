@@ -366,6 +366,18 @@ class TilePad(enum.Enum):
     min = ...
     """Min value padding."""
 
+class CompactMode(enum.Enum):
+    """Compact mode for tile buffer."""
+
+    null = ...
+    """No compact mode (default)."""
+
+    normal = ...
+    """Normal compact mode."""
+
+    row_plus_one = ...
+    """Row plus one compact mode."""
+
 class TensorView:
     """Tensor view representation with stride and layout."""
 
@@ -493,6 +505,9 @@ class TileView:
     pad: TilePad
     """Pad mode."""
 
+    compact: CompactMode
+    """Compact mode."""
+
     @overload
     def __init__(self) -> None:
         """Create an empty tile view."""
@@ -507,6 +522,7 @@ class TileView:
         slayout: TileLayout = ...,
         fractal: int = ...,
         pad: TilePad = ...,
+        compact: CompactMode = ...,
     ) -> None:
         """Create a tile view with all parameters.
 
@@ -518,6 +534,7 @@ class TileView:
             slayout: Scatter layout (default: none_box)
             fractal: Fractal size (default: 512)
             pad: Pad mode (default: null)
+            compact: Compact mode (default: null)
         """
 
 class TileType(ShapedType):

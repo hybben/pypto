@@ -320,6 +320,15 @@ class IRSerializer::Impl {
     }
     tv_map["pad"] = msgpack::object(pad_str, zone);
 
+    // Serialize compact
+    std::string compact_str;
+    switch (tile_view->compact) {
+      case CompactMode::null:         compact_str = "null"; break;
+      case CompactMode::normal:       compact_str = "normal"; break;
+      case CompactMode::row_plus_one: compact_str = "row_plus_one"; break;
+    }
+    tv_map["compact"] = msgpack::object(compact_str, zone);
+
     return msgpack::object(tv_map, zone);
   }
 

@@ -92,6 +92,7 @@ def test_dynamic_add():
         [128, 256],
         [96, 192],
         [16, 16],
+        [777, 666],
     ]
     torch.manual_seed(0)
     dtype = torch.float16

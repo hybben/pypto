@@ -199,5 +199,124 @@ class TestTupleVariableIndexParsing:
         assert len(if_stmts) >= 1
 
 
+def _top_level_if_stmts(func) -> list:
+    """Return IfStmt nodes at the top level of a function body (not nested)."""
+    body = func.body
+    stmts = body.stmts if hasattr(body, "stmts") else [body]
+    return [s for s in stmts if isinstance(s, ir.IfStmt)]
+
+
+class TestTupleSelectCache:
+    """Tests for the _tuple_select_cache that deduplicates buf[idx] expansions.
+
+    When the same (tuple_var_name, index_var_name) pair is accessed more than
+    once, the parser must reuse the already-emitted phi Var instead of building
+    a redundant scf.if chain.
+    """
+
+    def test_duplicate_access_produces_single_if_stmt(self):
+        """buf[idx] accessed twice → only one IfStmt at the function top level."""
+
+        @pl.function
+        def func(
+            a: pl.Scalar[pl.INT64],
+            b: pl.Scalar[pl.INT64],
+            idx: pl.Scalar[pl.INT64],
+        ):
+            buf = (a, b)
+            v1 = buf[idx]
+            v2 = buf[idx]   # cache hit — no new IfStmt
+            _ = v1 + v2
+
+        assert isinstance(func, ir.Function)
+        if_stmts = _top_level_if_stmts(func)
+        # With cache: only 1 IfStmt despite 2 buf[idx] accesses
+        assert len(if_stmts) == 1
+
+    def test_triple_access_still_single_if_stmt(self):
+        """buf[idx] accessed three times → still only one IfStmt."""
+
+        @pl.function
+        def func(
+            a: pl.Scalar[pl.INT64],
+            b: pl.Scalar[pl.INT64],
+            idx: pl.Scalar[pl.INT64],
+        ):
+            buf = (a, b)
+            v1 = buf[idx]
+            v2 = buf[idx]   # cache hit
+            v3 = buf[idx]   # cache hit again
+            _ = v1 + v2 + v3
+
+        assert isinstance(func, ir.Function)
+        if_stmts = _top_level_if_stmts(func)
+        assert len(if_stmts) == 1
+
+    def test_different_tuples_same_idx_separate_chains(self):
+        """buf1[idx] and buf2[idx] have different tuple names → two IfStmts."""
+
+        @pl.function
+        def func(
+            a: pl.Scalar[pl.INT64],
+            b: pl.Scalar[pl.INT64],
+            idx: pl.Scalar[pl.INT64],
+        ):
+            buf1 = (a, b)
+            buf2 = (b, a)
+            v1 = buf1[idx]
+            v2 = buf2[idx]  # different tuple var name → new chain
+            _ = v1 + v2
+
+        assert isinstance(func, ir.Function)
+        if_stmts = _top_level_if_stmts(func)
+        assert len(if_stmts) == 2
+
+    def test_same_tuple_different_idx_separate_chains(self):
+        """buf[idx1] and buf[idx2] have different index vars → two IfStmts."""
+
+        @pl.function
+        def func(
+            a: pl.Scalar[pl.INT64],
+            b: pl.Scalar[pl.INT64],
+            idx0: pl.Scalar[pl.INT64],
+            idx1: pl.Scalar[pl.INT64],
+        ):
+            buf = (a, b)
+            v1 = buf[idx0]
+            v2 = buf[idx1]  # different index var → new chain
+            _ = v1 + v2
+
+        assert isinstance(func, ir.Function)
+        if_stmts = _top_level_if_stmts(func)
+        assert len(if_stmts) == 2
+
+    def test_cached_result_is_same_var(self):
+        """Both accesses must resolve to the same phi Var name in the IR."""
+
+        @pl.function
+        def func(
+            a: pl.Scalar[pl.INT64],
+            b: pl.Scalar[pl.INT64],
+            idx: pl.Scalar[pl.INT64],
+        ):
+            buf = (a, b)
+            v1 = buf[idx]
+            v2 = buf[idx]   # cache hit
+
+        assert isinstance(func, ir.Function)
+        body = func.body
+        stmts = body.stmts if hasattr(body, "stmts") else [body]
+        assign_stmts = [s for s in stmts if isinstance(s, ir.AssignStmt)]
+        # Find v1 and v2 assignments (skip the buf = MakeTuple assignment)
+        tile_assigns = [s for s in assign_stmts if s.var.name in ("v1", "v2")]
+        assert len(tile_assigns) == 2
+        # Both v1 and v2 must be assigned the same phi Var
+        v1_rhs = tile_assigns[0].value
+        v2_rhs = tile_assigns[1].value
+        assert isinstance(v1_rhs, ir.Var)
+        assert isinstance(v2_rhs, ir.Var)
+        assert v1_rhs.name == v2_rhs.name
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

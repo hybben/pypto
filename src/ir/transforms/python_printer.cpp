@@ -1262,6 +1262,20 @@ std::string IRPythonPrinter::PrintTileView(const TileView& tile_view) {
       break;
   }
 
+  // Print compact
+  oss << ", compact=" << prefix_ << ".CompactMode.";
+  switch (tile_view.compact) {
+    case CompactMode::null:
+      oss << "null";
+      break;
+    case CompactMode::normal:
+      oss << "normal";
+      break;
+    case CompactMode::row_plus_one:
+      oss << "row_plus_one";
+      break;
+  }
+
   oss << ")";
   return oss.str();
 }

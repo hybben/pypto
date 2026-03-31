@@ -846,7 +846,8 @@ static const char* TileLayoutToStr(ir::TileLayout layout) {
 static std::string FormatTileBufTypeString(const std::string& loc, const std::string& dtype_str, int64_t rows,
                                            int64_t cols, ir::TileLayout blayout, ir::TileLayout slayout,
                                            uint64_t fractal, ir::TilePad pad, int64_t v_row, int64_t v_col,
-                                           bool v_row_dynamic = false, bool v_col_dynamic = false) {
+                                           bool v_row_dynamic = false, bool v_col_dynamic = false,
+                                           ir::CompactMode compact = ir::CompactMode::null) {
   std::ostringstream oss;
   oss << "!pto.tile_buf<loc=" << loc << ", dtype=" << dtype_str;
   oss << ", rows=" << rows << ", cols=" << cols;
@@ -855,7 +856,11 @@ static std::string FormatTileBufTypeString(const std::string& loc, const std::st
   oss << ", blayout=" << TileLayoutToStr(blayout);
   oss << ", slayout=" << TileLayoutToStr(slayout);
   oss << ", fractal=" << fractal;
-  oss << ", pad=" << static_cast<int>(pad) << ">";
+  oss << ", pad=" << static_cast<int>(pad);
+  if (compact != ir::CompactMode::null) {
+    oss << ", compact=" << static_cast<int>(compact);
+  }
+  oss << ">";
   return oss.str();
 }
 
@@ -863,7 +868,8 @@ static std::string FormatTileBufTypeString(const std::string& loc, const std::st
 static void ExtractTileTypeInfo(const TileType& tile_type, const PTOCodegen& codegen, std::string& dtype_str,
                                 int64_t& rows, int64_t& cols, ir::TileLayout& blayout,
                                 ir::TileLayout& slayout, uint64_t& fractal, ir::TilePad& pad,
-                                int64_t& v_row, int64_t& v_col, bool& v_row_dynamic, bool& v_col_dynamic) {
+                                int64_t& v_row, int64_t& v_col, bool& v_row_dynamic, bool& v_col_dynamic,
+                                ir::CompactMode& compact) {
   dtype_str = codegen.GetTypeString(tile_type.dtype_);
   if (tile_type.shape_.size() >= 2) {
     if (auto c0 = As<ir::ConstInt>(tile_type.shape_[0])) rows = c0->value_;
@@ -882,6 +888,7 @@ static void ExtractTileTypeInfo(const TileType& tile_type, const PTOCodegen& cod
     slayout = tv.slayout;
     fractal = tv.fractal;
     pad = tv.pad;
+    compact = tv.compact;
     if (tv.valid_shape.size() >= 1) {
       if (auto var = As<ir::Var>(tv.valid_shape[0])) {
         v_row_dynamic = true;
@@ -922,15 +929,16 @@ std::string PTOCodegen::GetTileBufTypeString(const ir::MemRef* memref) const {
   int64_t v_col = 32;
   bool v_row_dynamic = false;
   bool v_col_dynamic = false;
+  ir::CompactMode compact = ir::CompactMode::null;
 
   auto tile_it = memref_to_tile_type_.find(memref);
   if (tile_it != memref_to_tile_type_.end()) {
     ExtractTileTypeInfo(*tile_it->second, *this, dtype_str, rows, cols, blayout, slayout, fractal, pad,
-                        v_row, v_col, v_row_dynamic, v_col_dynamic);
+                        v_row, v_col, v_row_dynamic, v_col_dynamic, compact);
   }
 
   return FormatTileBufTypeString(loc, dtype_str, rows, cols, blayout, slayout, fractal, pad, v_row, v_col,
-                                 v_row_dynamic, v_col_dynamic);
+                                 v_row_dynamic, v_col_dynamic, compact);
 }
 
 std::string PTOCodegen::GetTileBufTypeStringFromTileType(
@@ -950,12 +958,13 @@ std::string PTOCodegen::GetTileBufTypeStringFromTileType(
   int64_t v_col = 32;
   bool v_row_dynamic = false;
   bool v_col_dynamic = false;
+  ir::CompactMode compact = ir::CompactMode::null;
 
   ExtractTileTypeInfo(*tile_type, *this, dtype_str, rows, cols, blayout, slayout, fractal, pad,
-                      v_row, v_col, v_row_dynamic, v_col_dynamic);
+                      v_row, v_col, v_row_dynamic, v_col_dynamic, compact);
 
   return FormatTileBufTypeString(loc, dtype_str, rows, cols, blayout, slayout, fractal, pad, v_row, v_col,
-                                 v_row_dynamic, v_col_dynamic);
+                                 v_row_dynamic, v_col_dynamic, compact);
 }
 
 std::string PTOCodegen::GetExprTypeAnnotation(const ir::ExprPtr& expr) {
@@ -1864,13 +1873,14 @@ void PTOCodegen::GenerateHelperFunction(const FunctionPtr& func) {
         ir::TilePad pad = ir::TilePad::null;
         int64_t v_row = 32, v_col = 32;
         bool v_row_dynamic = false, v_col_dynamic = false;
+        ir::CompactMode compact = ir::CompactMode::null;
         ExtractTileTypeInfo(*tile_type, *this, dtype_str, rows, cols, blayout, slayout, fractal, pad,
-                            v_row, v_col, v_row_dynamic, v_col_dynamic);
+                            v_row, v_col, v_row_dynamic, v_col_dynamic, compact);
         std::string loc = "vec";  // default memory space for annotation-only tile params
         var_to_mlir_[param->name_] = arg_name;
         extra_tile_buf_types_[arg_name] = FormatTileBufTypeString(
             loc, dtype_str, rows, cols, blayout, slayout, fractal, pad, v_row, v_col,
-            v_row_dynamic, v_col_dynamic);
+            v_row_dynamic, v_col_dynamic, compact);
       }
     } else if (auto tensor_type = As<TensorType>(param->GetType())) {
       std::string view_name = NewTemp();
@@ -1898,14 +1908,15 @@ void PTOCodegen::GenerateHelperFunction(const FunctionPtr& func) {
       ir::TilePad pad = ir::TilePad::null;
       int64_t v_row = 32, v_col = 32;
       bool v_row_dynamic = false, v_col_dynamic = false;
+      ir::CompactMode compact = ir::CompactMode::null;
       ExtractTileTypeInfo(*tile_type, *this, dtype_str, rows, cols, blayout, slayout, fractal, pad,
-                          v_row, v_col, v_row_dynamic, v_col_dynamic);
+                          v_row, v_col, v_row_dynamic, v_col_dynamic, compact);
       std::string loc = tile_type->memref_.has_value()
                             ? MemorySpaceToMLIR(tile_type->memref_.value()->memory_space_)
                             : "vec";
       stream_ << arg_name << ": "
               << FormatTileBufTypeString(loc, dtype_str, rows, cols, blayout, slayout, fractal, pad,
-                                        v_row, v_col, v_row_dynamic, v_col_dynamic);
+                                        v_row, v_col, v_row_dynamic, v_col_dynamic, compact);
     } else if (auto ptr_type = As<PtrType>(param->GetType())) {
       stream_ << arg_name << ": !pto.ptr<" << GetTypeString(ptr_type->dtype_) << ">";
     } else if (auto scalar_type = As<ScalarType>(param->GetType())) {
@@ -1932,13 +1943,14 @@ void PTOCodegen::GenerateHelperFunction(const FunctionPtr& func) {
       ir::TilePad pad = ir::TilePad::null;
       int64_t v_row = 32, v_col = 32;
       bool v_row_dynamic = false, v_col_dynamic = false;
+      ir::CompactMode compact = ir::CompactMode::null;
       ExtractTileTypeInfo(*tile_type, *this, dtype_str, rows, cols, blayout, slayout, fractal, pad,
-                          v_row, v_col, v_row_dynamic, v_col_dynamic);
+                          v_row, v_col, v_row_dynamic, v_col_dynamic, compact);
       std::string loc = tile_type->memref_.has_value()
                             ? MemorySpaceToMLIR(tile_type->memref_.value()->memory_space_)
                             : "vec";
       stream_ << FormatTileBufTypeString(loc, dtype_str, rows, cols, blayout, slayout, fractal, pad,
-                                        v_row, v_col, v_row_dynamic, v_col_dynamic);
+                                        v_row, v_col, v_row_dynamic, v_col_dynamic, compact);
     } else if (auto ptr_type = As<PtrType>(rt)) {
       stream_ << "!pto.ptr<" << GetTypeString(ptr_type->dtype_) << ">";
     } else {

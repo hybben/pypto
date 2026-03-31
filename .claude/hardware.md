@@ -279,6 +279,89 @@ Each Vector core has 2 sub-blocks (sub_id = 0 or 1). Each processes TILE/2 rows.
 
 ---
 
+## Tail Block Constraint: Fractal Contiguity for L0A/L0B
+
+### Background
+
+TMATMUL requires the data in L0A (Left) and L0B (Right) to be **fractally contiguous**: all fractals that contain valid data must be adjacent in memory with no invalid fractals between them.
+
+Each L0A/L0B fractal for FP16/BF16 is **16 rows × 16 cols = 512 bytes** (`TileConfig::fractalABSize`). For FP32 it is 16 rows × 8 cols = 512 bytes.
+
+### When the Constraint is Violated
+
+For a tile with `valid_shape = (V_row, V_col)` and fractal = 16×16, the valid data spans `ceil(V_row/16) × ceil(V_col/16)` fractals. In row-major fractal storage order, these fractals must all be adjacent. If the tile has more fractal columns than `ceil(V_col/16)`, there are invalid fractals at the end of each fractal row — **between** the last valid fractal of row N and the first valid fractal of row N+1.
+
+**Example** — valid_shape = (17, 17), fractal = 16×16:
+
+```
+Tile (32, 32) = 2×2 fractals (2 fractal cols):
+  Memory: [frac(0,0)] [frac(0,1)] [frac(1,0)] [frac(1,1)]
+  Valid fractals span 2×2 = all 4 → contiguous ✓
+
+Tile (48, 48) = 3×3 fractals (3 fractal cols):
+  Memory: [frac(0,0)] [frac(0,1)] [frac(0,2)] [frac(1,0)] [frac(1,1)] ...
+                                    ^ INVALID ^
+  Valid fractals are (0,0),(0,1),(1,0),(1,1).
+  But frac(0,2) sits between frac(0,1) and frac(1,0) → NOT contiguous ✗
+```
+
+`frac(0,2)` lies outside `valid_col=17` (covers cols 32–47), yet interrupts the sequence of valid fractals that TMATMUL must read. From the hardware's view, fractals are read sequentially from the tile buffer; a gap (invalid fractal) between valid fractals causes incorrect matmul results.
+
+### The Rule
+
+For L0A and L0B tiles involved in matmul with `valid_shape < tile_shape`:
+
+```
+tile_cols == ceil(valid_col / 16) * 16   ← critical for row-major fractal storage
+tile_rows == ceil(valid_row / 16) * 16   ← avoids reading invalid trailing fractal rows
+```
+
+The tile dimensions must be the **smallest multiples of 16** that cover the valid shape. Any larger size in the column dimension introduces invalid fractals inside valid fractal rows.
+
+### set_validshape Does Not Fix This
+
+`set_validshape` / `pto.set_validshape` only sets the tile's valid row/col metadata registers — it tells downstream ops how many rows/cols contain meaningful results. It does **not** rearrange or compact the fractals in memory. A tile (48, 48) with `set_validshape(17, 17)` still has the non-contiguous layout above; the matmul hardware will still read frac(0,2) and get wrong results.
+
+### CompactMode (Supported)
+
+`TileLeftCompact` / `TileRightCompact` in `pto_tile.hpp` use `CompactMode::Normal`. Compact mode physically packs only the valid fractals contiguously, removing the gaps. This allows a (48, 48) tile buffer to hold (17, 17) valid data with correct matmul behavior.
+
+**PyPTO now supports CompactMode end-to-end.** Set it via `plm.TileType(compact=N)` when creating a tile:
+
+| Value | `plm.TileType` | `ir.CompactMode` | MLIR |
+|-------|---------------|-----------------|------|
+| 0 | `compact=None` (default) | `CompactMode.null` | *(omitted)* |
+| 1 | `compact=1` | `CompactMode.normal` | `compact=1` |
+| 2 | `compact=2` | `CompactMode.row_plus_one` | `compact=2` |
+
+```python
+tile_type = plm.TileType(
+    shape=[128, 128], dtype=pl.FP16,
+    target_memory=pl.MemorySpace.Left,
+    blayout=1, slayout=1,
+    valid_shape=[-1, -1],
+    compact=1,   # CompactMode.normal — packs valid fractals contiguously
+)
+tile = plm.make_tile(tile_type, addr=0x00000, size=32768)
+```
+
+The generated PTOAS MLIR will include `compact=1` in the `!pto.tile_buf<...>` type attribute.
+
+### Practical Impact
+
+Dynamic kernels (e.g. M not a multiple of the tile size) produce "tail" iterations where `valid_shape < tile_shape`. With CompactMode now supported:
+- Use `compact=1` (`CompactMode.normal`) for L0A/L0B tiles in tail blocks to ensure valid fractals are contiguous for TMATMUL.
+- `compact=2` (`row_plus_one`) adds one extra row — use when the hardware requires it for alignment.
+- Tiles without compact (default) remain unaffected.
+
+### Reference
+
+- `pto_tile.hpp`: `TileLeft`, `TileLeftCompact`, `TileRight`, `TileRightCompact`, `CompactMode`
+- `TileConfig::fractalABSize = 512` bytes (16×16 FP16)
+- `TileConfig::fractalCSize = 1024` bytes (16×16 FP32, ACC tile)
+
+---
+
 ## Compilation Flow
 ```
 Python kernel (@fe.kernel)
