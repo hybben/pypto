@@ -259,6 +259,12 @@ class ASTParser:
         # Used by auto-sync to resolve tile_buf[buf_idx] subscript accesses.
         self._tile_tuple_registry: dict[str, list[str]] = {}
 
+        # Cache: (tuple_var_name, index_ssa_var_name) → phi ir.Var from _build_tuple_index_chain.
+        # Applies to all tuple types (tile, tensor, event ID, etc.).
+        # Prevents re-emitting an if-else chain when the same buf[idx] expression
+        # appears multiple times in the same linear code region.
+        self._tuple_select_cache: dict[tuple[str, str], ir.Var] = {}
+
         # Auto-sync: track per-tile pipeline state for automatic sync insertion
         if auto_sync:
             from pypto.frontend.sync_tracker import SyncTracker
@@ -3906,12 +3912,24 @@ class ASTParser:
                         hint="Use a constant index to access elements of different types",
                     )
 
+            # Cache lookup: same (tuple_var_name, index_ssa_var_name) → reuse existing phi var.
+            # Applies to all tuple element types (tile, tensor, event ID, etc.).
+            cache_key: tuple[str, str] | None = None
+            if isinstance(subscript.value, ast.Name) and isinstance(index_expr, ir.Var):
+                cache_key = (subscript.value.id, index_expr.name)
+                if cache_key in self._tuple_select_cache:
+                    return self._tuple_select_cache[cache_key]
+
             result = self._build_tuple_index_chain(
                 value_expr, index_expr, first_type, len(elem_types), 0, span
             )
             if result is None:
                 # Single-element tuple: leaf emits directly, return TupleGetItemExpr
                 return ir.TupleGetItemExpr(value_expr, 0, span)
+
+            # Store in cache for subsequent uses of the same buf[idx]
+            if cache_key is not None:
+                self._tuple_select_cache[cache_key] = result
             return result
 
         # Check if value is tuple type (runtime check)
