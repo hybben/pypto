@@ -21,7 +21,7 @@ import torch
 import torch_npu
 import pypto.frontend as fe
 import pypto.language as pl
-import pypto.language.manual as plm
+import pypto.language.op.manual as plm
 
 # ================================================================
 #  Configuration — change QK_PRELOAD to tune pre-compute depth
@@ -128,7 +128,7 @@ def alloc_cube_buffer():
 # Write alloc_exp_corr_fifo to a temp .py so auto-inline can read its source.
 import tempfile as _tf, importlib.util as _ilu, os as _os
 def _gen_alloc_exp_corr():
-    lines = ["import pypto.language as pl", "import pypto.language.manual as plm", ""]
+    lines = ["import pypto.language as pl", "import pypto.language.op.manual as plm", ""]
     lines.append("def alloc_exp_corr_fifo():")
     names, rm_names = [], []
     for i, addr in enumerate(EXP_CORR_ADDRS):

@@ -22,13 +22,13 @@ The explicit ``pl.tensor.*``, ``pl.block.*``, and ``pl.system.*``
 namespaces remain available for cases where the caller wants to be explicit.
 """
 
-from . import block_ops as block
+from .auto.op.auto_ops import block
 from . import system_ops as system
 from . import ptr_ops as ptr
-from . import tensor_ops as tensor
+from .auto.op.auto_ops import tensor
 
 # Promoted block-only ops (accessible as pl.load, etc.)
-from .block_ops import (
+from .auto.op.auto_ops import (
     abs,
     addc,
     addsc,
@@ -92,13 +92,13 @@ from .block_ops import (
 )
 
 # Promoted tensor-only ops (accessible as pl.create_tensor, etc.)
-from .tensor_ops import assemble, create_tensor, dim
+from .auto.op.auto_ops import assemble, create_tensor, dim
 
 # Promoted ptr ops (accessible as pl.make_tensor, pl.addptr)
 from .ptr_ops import addptr, make_tensor
 
 # Unified dispatch (overlapping ops)
-from .unified_ops import (
+from .auto.op.auto_ops import (
     add,
     cast,
     div,

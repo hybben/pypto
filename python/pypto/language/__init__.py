@@ -55,10 +55,10 @@ from .dsl_api import (
     while_,
     yield_,
 )
-from .op import block_ops as block
+from .op.auto.op.auto_ops import block
 from .op import system_ops as system
-from .op import tensor_ops as tensor
-from .op.block_ops import (
+from .op.auto.op.auto_ops import tensor
+from .op.auto.op.auto_ops import (
     abs,
     addc,
     addsc,
@@ -121,8 +121,8 @@ from .op.block_ops import (
     setval,
 )
 from .op.ptr_ops import addptr, make_tensor
-from .op.tensor_ops import assemble, create_tensor, dim, getval, setval
-from .op.unified_ops import (
+from .op.auto.op.auto_ops import assemble, create_tensor, dim
+from .op.auto.op.auto_ops import (
     add,
     cast,
     div,

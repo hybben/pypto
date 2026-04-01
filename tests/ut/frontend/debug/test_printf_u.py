@@ -14,7 +14,7 @@ import torch_npu
 
 import pypto.frontend as fe
 import pypto.language as pl
-import pypto.language.manual as plm
+import pypto.language.op.manual as plm
 
 
 def _run_add_case(compiled_lib, flag_in, value_u8, value_u16, value_u32, value_u64):

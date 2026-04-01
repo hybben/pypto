@@ -2598,7 +2598,7 @@ class ASTParser:
 
     def _parse_tile_type_call(self, call: ast.Call) -> Any:
         """Parse TileType(...) as a dataclass instantiation."""
-        from pypto.language.manual.op.manual_ops import TileType
+        from pypto.language.op.manual.op.manual_ops import TileType
 
         kwargs = {}
         for kw in call.keywords:
@@ -2773,7 +2773,7 @@ class ASTParser:
 
         # Special handling for make_tile with TileType
         if op_name == "make_tile":
-            from pypto.language.manual.op.manual_ops import TileType
+            from pypto.language.op.manual.op.manual_ops import TileType
             if len(args) >= 1 and isinstance(args[0], TileType):
                 tile_type = args[0]
                 # Extract parameters from TileType
