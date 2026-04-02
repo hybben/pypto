@@ -226,6 +226,8 @@ def softmax_body(ctx, sq_dim, row_off):
     q_idx = ctx.q_count % 2
     global_max_rm_cur = global_max_rm_buf[q_idx]
     global_sum_rm_cur = global_sum_rm_buf[q_idx]
+    pl.system.sync_src(set_pipe=pl.PipeType.MTE3, wait_pipe=pl.PipeType.MTE2, event_id=0)
+    pl.system.sync_dst(set_pipe=pl.PipeType.MTE3, wait_pipe=pl.PipeType.MTE2, event_id=0)
     plm.load(qk_vec, qk_buf, [p_fifo_slot * sq_dim + ctx.sq_off + row_off, skv_off])
     pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)

@@ -472,6 +472,152 @@ def _inject_set_ffts_to_mlir(mlir_code: str) -> str:
     final_code = new_sig[:brace_pos+1] + new_op + new_sig[brace_pos+1:]
     return final_code
 
+def _inject_aic_cross_core_eventid_offset_cce(cpp_code: str, arch: str) -> str:
+    """
+    在 CCE C++ 代码的 #if defined(__DAV_CUBE__) ... #endif 块内，
+    每条 cross-core sync 指令之后插入一条相同指令，但 event_id 增加 16。
+    event_id 既可以是字面整数，也可以是任意表达式（变量、数组下标等）。
+
+    a2/a3: ffts_cross_core_sync(..., EXPR) / wait_flag_dev(EXPR)
+    a5:    set_intra_block(..., EXPR)       / wait_intra_block(..., EXPR)
+    """
+    is_a5 = arch == "a5"
+
+    # [^)]+ matches any expression without nested ')' — covers literals,
+    # variables, and array-index expressions such as event_id_arr[i].
+    set_re = re.compile(r'^([ \t]*)(set_intra_block\((\w+),\s*([^)]+)\);)\s*$')
+    wait_re = re.compile(r'^([ \t]*)(wait_intra_block\((\w+),\s*([^)]+)\);)\s*$')
+
+    def _add_16(expr: str) -> str:
+        """Return expr+16 as a literal when expr is a plain integer, else as C++ expression."""
+        e = expr.strip()
+        return str(int(e) + 16) if re.fullmatch(r'\d+', e) else f"({e}) + 16"
+
+    def _make_dup(line_stripped: str) -> str | None:
+        m = set_re.match(line_stripped)
+        if m:
+            return f"{m.group(1)}set_intra_block({m.group(3)}, {_add_16(m.group(4))});\n"
+        m = wait_re.match(line_stripped)
+        if m:
+            return f"{m.group(1)}wait_intra_block({m.group(3)}, {_add_16(m.group(4))});\n"
+        return None
+
+    lines = cpp_code.splitlines(keepends=True)
+    result = []
+    in_cube = False
+    depth = 0
+
+    for line in lines:
+        stripped = line.rstrip('\n\r')
+        result.append(line)
+
+        if not in_cube:
+            if stripped.strip() == '#if defined(__DAV_CUBE__)':
+                in_cube = True
+                depth = 1
+        else:
+            s = stripped.strip()
+            if s.startswith('#if'):
+                depth += 1
+            elif s.startswith('#endif'):
+                depth -= 1
+                if depth == 0:
+                    in_cube = False
+            else:
+                dup = _make_dup(stripped)
+                if dup:
+                    result.append(dup)
+
+    return ''.join(result)
+
+
+def _inject_aic_cross_core_eventid_offset(mlir_code: str) -> str:
+    """
+    在 pto.section.cube { ... } 块内，每条 pto.sync.set / pto.sync.wait 指令之后，
+    紧接着插入一条相同指令，但 event_id 增加 16。
+    支持两种 event_id 形式：
+      - 字面整数（如 5）：直接计算 N+16 作为新字面量。
+      - SSA 值（如 %eid）：插入 arith.constant + arith.addi 再复制 sync 指令。
+    使用花括号计数定位 cube section 的边界。
+    """
+    cube_section_pattern = re.compile(r'pto\.section\.cube\s*\{')
+    # group(1)=indent  group(2)=full op text  group(3)=set|wait
+    # group(4)=pipe name  group(5)=event_id (\d+ or %ssa)  group(6)=trailing attrs
+    sync_pattern = re.compile(
+        r'^([ \t]*)(pto\.sync\.(set|wait)\s+#pto\.pipe<(\w+)>,\s*(\d+|%\w+)([^\n]*))\n',
+        re.MULTILINE,
+    )
+
+    result = []
+    pos = 0
+    ssa_counter = 0  # ensures unique names for inserted arith SSA values
+
+    while pos < len(mlir_code):
+        match = cube_section_pattern.search(mlir_code, pos)
+        if not match:
+            result.append(mlir_code[pos:])
+            break
+
+        # Append everything up to and including the opening '{'
+        result.append(mlir_code[pos:match.end()])
+
+        # Find the matching closing '}' using brace counting
+        depth = 1
+        scan_pos = match.end()
+        while depth > 0 and scan_pos < len(mlir_code):
+            if mlir_code[scan_pos] == '{':
+                depth += 1
+            elif mlir_code[scan_pos] == '}':
+                depth -= 1
+            scan_pos += 1
+
+        if depth != 0:
+            # Unmatched brace – leave the rest unchanged
+            result.append(mlir_code[match.end():])
+            break
+
+        # cube_content is the text between '{' and the matching '}'
+        cube_content = mlir_code[match.end():scan_pos - 1]
+
+        # Insert duplicate sync ops (event_id + 16) after every sync op
+        new_parts = []
+        content_pos = 0
+        for sync_match in sync_pattern.finditer(cube_content):
+            new_parts.append(cube_content[content_pos:sync_match.end()])
+
+            indent = sync_match.group(1)
+            op_type = sync_match.group(3)    # 'set' or 'wait'
+            pipe_name = sync_match.group(4)  # e.g. 'PIPE_MTE2'
+            event_id = sync_match.group(5)   # literal digits or '%var'
+            trailing = sync_match.group(6)   # optional attrs, e.g. ' {ffts_mode = 0 : i32}'
+
+            if re.fullmatch(r'\d+', event_id):
+                # Static integer: compute N+16 as a literal at transform time
+                new_eid = str(int(event_id) + 16)
+            else:
+                # Dynamic SSA value: emit arith ops to compute value + 16
+                c16_name = f"%_pypto_c16_{ssa_counter}"
+                new_eid = f"%_pypto_eid_p16_{ssa_counter}"
+                ssa_counter += 1
+                new_parts.append(f"{indent}{c16_name} = arith.constant 16 : index\n")
+                new_parts.append(
+                    f"{indent}{new_eid} = arith.addi {event_id}, {c16_name} : index\n"
+                )
+
+            new_parts.append(
+                f"{indent}pto.sync.{op_type} #pto.pipe<{pipe_name}>, {new_eid}{trailing}\n"
+            )
+            content_pos = sync_match.end()
+
+        new_parts.append(cube_content[content_pos:])
+        result.append(''.join(new_parts))
+        result.append('}')
+
+        pos = scan_pos
+
+    return ''.join(result)
+
+
 def _normalize_arch(arch: str | None) -> str:
     """Normalize and validate arch names to 'a2', 'a3', or 'a5'."""
     value = (arch or os.environ.get("PYPTO_JIT_ARCH") or "a3").strip().lower()
@@ -639,6 +785,8 @@ def compile(prog, clean_up=False, timeout=20, arch: str = "a3", enable_print_deb
         needs_print_debug = ("pto.tprint" in mlir_code) or ("pto.print" in mlir_code)
         if has_cross_sync:
             mlir_code = _inject_set_ffts_to_mlir(mlir_code)
+            if arch in ("a5"):
+                mlir_code = _inject_aic_cross_core_eventid_offset(mlir_code)
         with open(ir_path, "w") as f:
             f.write(mlir_code)
 

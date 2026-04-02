@@ -193,7 +193,7 @@ def fa_k_kernel_bn(
                         pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=0)
 
                         pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=QK_READY)
-                        pl.system.wait_cross_core(pipe=pl.PipeType.M, event_id=P_READY)
+                        pl.system.wait_cross_core(pipe=pl.PipeType.MTE2, event_id=P_READY)
 
                         buf_idx_pv = (q_count * skv_tiles + j) % 2
                         pl.system.sync_dst(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.MTE2, event_id=1)
@@ -273,7 +273,7 @@ def fa_k_kernel_bn(
                 for qi in pl.range(0, sq_tiles):
                     sq_off = qi * TS
                     q_mat_idx = q_count % 2
-                    pl.system.wait_cross_core(pipe=pl.PipeType.V, event_id=QK_READY)
+                    pl.system.wait_cross_core(pipe=pl.PipeType.MTE2, event_id=QK_READY)
                     plm.load_tile(qk_vec, qk_buf, [b_idx, n_idx, qi * 2 + sub_id, 0])
                     pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
                     pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
@@ -293,14 +293,14 @@ def fa_k_kernel_bn(
                     plm.store_tile(p_buf, p_f16, [b_idx, n_idx, qi * 2 + sub_id, 0])
                     pl.system.set_cross_core(pipe=pl.PipeType.MTE3, event_id=P_READY)
 
-                    pl.system.wait_cross_core(pipe=pl.PipeType.V, event_id=PV_READY)
+                    pl.system.wait_cross_core(pipe=pl.PipeType.MTE2, event_id=PV_READY)
                     plm.load_tile(running_o, pv_buf, [core_id * 4 + q_mat_idx * 2 + sub_id, 0])
                     pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
                     pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
 
                     for j in pl.range(1, skv_tiles):
                         skv_off = j * TKV
-                        pl.system.wait_cross_core(pipe=pl.PipeType.V, event_id=QK_READY)
+                        pl.system.wait_cross_core(pipe=pl.PipeType.MTE2, event_id=QK_READY)
                         plm.load_tile(qk_vec, qk_buf, [b_idx, n_idx, qi * 2 + sub_id, j])
                         pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
                         pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
@@ -330,7 +330,7 @@ def fa_k_kernel_bn(
                         plm.store_tile(p_buf, p_f16, [b_idx, n_idx, qi * 2 + sub_id, j])
                         pl.system.set_cross_core(pipe=pl.PipeType.MTE3, event_id=P_READY)
 
-                        pl.system.wait_cross_core(pipe=pl.PipeType.V, event_id=PV_READY)
+                        pl.system.wait_cross_core(pipe=pl.PipeType.MTE2, event_id=PV_READY)
                         plm.load_tile(pv_vec, pv_buf, [core_id * 4 + q_mat_idx * 2 + sub_id, 0])
                         pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
                         pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0)
