@@ -201,7 +201,7 @@ def fa_k_kernel_bs(
                         pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=0)
 
                         pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=QK_READY)
-                        pl.system.wait_cross_core(pipe=pl.PipeType.M, event_id=P_READY)
+                        pl.system.wait_cross_core(pipe=pl.PipeType.MTE2, event_id=P_READY)
 
                         buf_idx_pv = (q_count * skv_tiles + j) % 2
                         pl.system.sync_dst(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.MTE2, event_id=1)
@@ -374,12 +374,12 @@ def test_fa_k_bs():
     torch.npu.set_device(device)
     torch.manual_seed(42)
     for b, sq, n, skv, d, num_cores in [
-        (6, 256, 1, 256, TD, 24),
-        (2, 1024, 1, 1024, TD, 12),
+        (25, 256, 1, 256, TD, 24),
+        (2, 1024, 1, 2048, TD, 12),
         (1, 8192, 4, 8192, TD, 24),
-        (2, 512, 4, 512, TD, 24),
+        (4, 512, 4, 512, TD, 6),
         (2, 2048, 4, 2048, TD, 24),
-        (4, 512, 8, 512, TD, 24),
+        (7, 512, 8, 512, TD, 24),
     ]:
         print(f"\nFA-K-BS (b={b}, sq={sq}, n={n}, skv={skv}, d={d}) cores={num_cores}")
         q = torch.rand((b, sq, n, d), device=device, dtype=torch.float16)
@@ -405,18 +405,30 @@ def test_fa_k_bs():
             remaining_cores = num_cores - core
             ideal_work = (remaining_work + remaining_cores - 1) // remaining_cores if remaining_cores > 0 else remaining_work
             
-            remaining_in_b = n - start_n
-            actual_work = min(ideal_work, remaining_in_b)
-            
-            b_ranges[core, 0] = start_b
-            b_ranges[core, 1] = start_b + 1
-            n_ranges[core, 0] = start_n
-            n_ranges[core, 1] = start_n + actual_work
-            
-            current_work += actual_work
+            if n == 1:
+                end_work = min(start_work + ideal_work, total_work)
+                end_b = end_work // n
+                
+                b_ranges[core, 0] = start_b
+                b_ranges[core, 1] = end_b
+                n_ranges[core, 0] = 0
+                n_ranges[core, 1] = 1
+                
+                current_work = end_work
+            else:
+                remaining_in_b = n - start_n
+                actual_work = min(ideal_work, remaining_in_b)
+                
+                b_ranges[core, 0] = start_b
+                b_ranges[core, 1] = start_b + 1
+                n_ranges[core, 0] = start_n
+                n_ranges[core, 1] = start_n + actual_work
+                
+                current_work += actual_work
             core += 1
-        
-        fe.launch(None, num_cores, compiled, q, k, v, o, qk_buf, p_buf, pv_buf, b_ranges, n_ranges)
+
+        actual_num_cores = core
+        fe.launch(None, actual_num_cores, compiled, q, k, v, o, qk_buf, p_buf, pv_buf, b_ranges, n_ranges)
         torch.npu.synchronize()
 
         # Print intermediate results for debugging
