@@ -80,6 +80,7 @@ from .op.manual_ops import (
     minimum,
     mins,
     move,
+    mrgsort,
     mul,
     muls,
     neg,
@@ -108,6 +109,7 @@ from .op.manual_ops import (
     shls,
     shr,
     shrs,
+    sort32,
     sqrt,
     store,
     store_tile,
@@ -182,6 +184,8 @@ __all__ = [
     "gather", "gatherb",
     # Reduction
     "row_max", "row_sum", "row_min",
+    # Sorting
+    "sort32", "mrgsort",
     # Broadcast
     "row_expand", "row_expand_add", "row_expand_sub", "row_expand_mul", "row_expand_div",
     "col_expand", "col_expand_mul", "col_expand_div", "col_expand_sub",

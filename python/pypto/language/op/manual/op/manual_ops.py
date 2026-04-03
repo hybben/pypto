@@ -924,6 +924,51 @@ def row_min(tile: Tile, tmp: Tile, out: Tile) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Sorting operations
+# ---------------------------------------------------------------------------
+
+def sort32(src: Tile, idx: Tile, dst: Tile, tmp: Tile | None = None) -> None:
+    """Sort fixed-size 32-element blocks and produce an index mapping.
+
+    This operation sorts each 32-element block of the input tile and produces
+    two outputs: the sorted values and the permutation indices.
+
+    Args:
+        src: Input tile with loc=vec, blayout=row_major
+        idx: Input/output tile for permutation indices (dtype=UINT32, modified in-place)
+        dst: Output tile for sorted values (same dtype as src)
+        tmp: Optional scratch tile for temporary storage
+    """
+    if tmp is not None:
+        dst._expr = _ir_core.create_op_call(
+            "manual.sort32", [src.unwrap(), idx.unwrap(), dst.unwrap(), tmp.unwrap()], {}, _span()
+        )
+    else:
+        dst._expr = _ir_core.create_op_call(
+            "manual.sort32", [src.unwrap(), idx.unwrap(), dst.unwrap()], {}, _span()
+        )
+
+
+def mrgsort(src: Tile, dst: Tile, block_len: int) -> None:
+    """Perform merge sort on sorted lists (format1).
+
+    This operation performs a merge sort on the input tile, merging sorted
+    blocks of the specified length.
+
+    Note: Only format1 is supported (single src, single dst).
+    format2 (multi-list variant) is not exposed in the pypto API.
+
+    Args:
+        src: Input tile with loc=vec, blayout=row_major, rows=1
+        dst: Output tile (same dtype as src)
+        block_len: Block length for merge (must be multiple of 64)
+    """
+    dst._expr = _ir_core.create_op_call(
+        "manual.mrgsort", [src.unwrap(), dst.unwrap()], {"block_len": block_len}, _span()
+    )
+
+
+# ---------------------------------------------------------------------------
 # Broadcast / expansion operations
 # ---------------------------------------------------------------------------
 
@@ -1081,6 +1126,8 @@ __all__ = [
     "gather", "gatherb",
     # Reduction
     "row_max", "row_sum", "row_min",
+    # Sorting
+    "sort32", "mrgsort",
     # Broadcast
     "row_expand", "row_expand_add", "row_expand_sub", "row_expand_mul", "row_expand_div",
     "col_expand", "col_expand_mul", "col_expand_div", "col_expand_sub",

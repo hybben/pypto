@@ -209,33 +209,6 @@ static std::string MakeCiCodegenPTO(const std::string& pto_op_name, const CallPt
   return "";
 }
 
-// TODO(guoliwei): Sorting operations typically have multiple outputs, which has not yet been addressed.
-// Helper function for Sort32
-static std::string MakeSort32CodegenPTO(const std::string& pto_op_name, const CallPtr& op,
-                                        codegen::CodegenBase& codegen_base) {
-  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
-  CHECK(op->args_.size() == 1) << "Operation:[" << pto_op_name << "] requires 1 argument, but got "
-                               << op->args_.size();
-  // std::string src = codegen.GetExprAsCode(op->args_[0]);
-  // std::string dst = codegen.GetCurrentResultTarget();
-  codegen.Emit(pto_op_name);
-  return "";
-}
-
-// TODO(guoliwei): Sorting operations typically have multiple outputs, which has not yet been addressed.
-// Helper function for MrgSort
-static std::string MakeMrgSortCodegenPTO(const std::string& pto_op_name, const CallPtr& op,
-                                         codegen::CodegenBase& codegen_base) {
-  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(codegen_base);
-  CHECK(op->args_.size() == 2) << "Operation:[" << pto_op_name << "] requires 2 arguments, but got "
-                               << op->args_.size();
-  // std::string src = codegen.GetExprAsCode(op->args_[0]);
-  // std::string blockLen = codegen.GetExprAsCode(op->args_[1]);
-  // std::string dst = codegen.GetCurrentResultTarget();
-  codegen.Emit(pto_op_name);
-  return "";
-}
-
 // Helper function for Print
 static std::string MakePrintCodegenPTO(const std::string& pto_op_name, const CallPtr& op,
                                        codegen::CodegenBase& codegen_base) {
@@ -1242,20 +1215,6 @@ REGISTER_BACKEND_OP(Backend910B_PTO, "block.ci")
     .set_pipe(ir::PipeType::V)
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
       return MakeCiCodegenPTO("pto.tci", op, codegen);
-    });
-
-// TODO(guoliwei): Sorting operations typically have multiple outputs, which has not yet been addressed.
-REGISTER_BACKEND_OP(Backend910B_PTO, "block.sort32")
-    .set_pipe(ir::PipeType::V)
-    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
-      return MakeSort32CodegenPTO("pto.tsort32", op, codegen);
-    });
-
-// TODO(guoliwei): Sorting operations typically have multiple outputs, which has not yet been addressed.
-REGISTER_BACKEND_OP(Backend910B_PTO, "block.mrgsort")
-    .set_pipe(ir::PipeType::V)
-    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
-      return MakeMrgSortCodegenPTO("pto.tmrgsort", op, codegen);
     });
 
 REGISTER_BACKEND_OP(Backend910B_PTO, "debug.dump_tile")

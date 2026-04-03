@@ -206,5 +206,50 @@ REGISTER_OP("manual.set_validshape")
       return DeduceManualOutTileType(args, kwargs, "manual.set_validshape", 3);
     });
 
+// ---------------------------------------------------------------------------
+// Sorting operations
+// ---------------------------------------------------------------------------
+
+REGISTER_OP("manual.sort32")
+    .set_op_category("ManualOp")
+    .set_description(
+        "Manual sort fixed-size 32-element blocks with index mapping. "
+        "Sorts each 32-element block and produces sorted values and permutation indices.")
+    .add_argument("src", "Input tile (TileType)")
+    .add_argument("idx", "Input/output tile for permutation indices (TileType, UINT32)")
+    .add_argument("dst", "Output tile for sorted values (TileType)")
+    .add_argument("tmp", "Optional scratch tile (TileType)")
+    .f_deduce_type([](const std::vector<ExprPtr>& args,
+                      const std::vector<std::pair<std::string, std::any>>& kwargs) {
+      CHECK(args.size() == 3 || args.size() == 4)
+          << "manual.sort32 requires 3 or 4 arguments (src, idx, dst[, tmp]), but got "
+          << args.size();
+      auto dst_type = As<TileType>(args[2]->GetType());
+      CHECK(dst_type) << "manual.sort32: dst must be TileType, but got "
+                      << args[2]->GetType()->TypeName();
+      return dst_type;
+    });
+
+// Note: Only format1 is supported (single src, single dst, blockLen operand).
+// format2 requires 4 srcs which is not exposed in pypto API.
+REGISTER_OP("manual.mrgsort")
+    .set_op_category("ManualOp")
+    .set_description(
+        "Manual merge sort on sorted lists (format1). "
+        "Performs merge sort with specified block length.")
+    .add_argument("src", "Input tile (TileType)")
+    .add_argument("dst", "Output tile (TileType)")
+    .set_attr<int>("block_len")
+    .f_deduce_type([](const std::vector<ExprPtr>& args,
+                      const std::vector<std::pair<std::string, std::any>>& kwargs) {
+      CHECK(args.size() == 2)
+          << "manual.mrgsort requires 2 arguments (src, dst) for format1, but got "
+          << args.size();
+      auto dst_type = As<TileType>(args[1]->GetType());
+      CHECK(dst_type) << "manual.mrgsort: dst must be TileType, but got "
+                      << args[1]->GetType()->TypeName();
+      return dst_type;
+    });
+
 }  // namespace ir
 }  // namespace pypto

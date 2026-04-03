@@ -1598,5 +1598,106 @@ REGISTER_BACKEND_OP(Backend910B_PTO, "manual.set_validshape")
       return "";
     });
 
+// ----------------------------------------------------------------------------
+// Sorting operations
+// ----------------------------------------------------------------------------
+
+static std::string MakeManualSort32PTO(const CallPtr& op, codegen::CodegenBase& cb) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(cb);
+  CHECK(op->args_.size() == 3 || op->args_.size() == 4)
+      << "manual.sort32: expected 3 or 4 args (src, idx, dst[, tmp]), got "
+      << op->args_.size();
+
+  std::ostringstream oss;
+  oss << "pto.tsort32 ins(";
+
+  std::string src = codegen.GetExprAsCode(op->args_[0]);
+  std::string src_type = codegen.GetExprTypeAnnotation(op->args_[0]);
+
+  std::string idx = codegen.GetExprAsCode(op->args_[1]);
+  std::string idx_type = codegen.GetExprTypeAnnotation(op->args_[1]);
+
+  std::string dst = codegen.GetExprAsCode(op->args_[2]);
+  std::string dst_type = codegen.GetExprTypeAnnotation(op->args_[2]);
+
+  oss << src << ", " << idx;
+
+  if (op->args_.size() == 4) {
+    std::string tmp = codegen.GetExprAsCode(op->args_[3]);
+    oss << ", " << tmp;
+  }
+  if (!src_type.empty()) {
+    oss << " : " << src_type;
+  }
+  if (!idx_type.empty()) {
+    oss << ", " << idx_type;
+  }
+
+  if (op->args_.size() == 4) {
+    std::string tmp_type = codegen.GetExprTypeAnnotation(op->args_[3]);
+    if (!tmp_type.empty()) {
+      oss << ", " << tmp_type;
+    }
+  }
+
+  oss << ") outs(" << dst;
+  if (!dst_type.empty()) {
+    oss << " : " << dst_type;
+  }
+
+  oss << ")";
+  codegen.Emit(oss.str());
+  return "";
+}
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "manual.sort32")
+    .set_pipe(ir::PipeType::V)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeManualSort32PTO(op, codegen);
+    });
+
+// Note: format1 does NOT support tmp. format2 requires 4 srcs which pypto doesn't expose.
+static std::string MakeManualMrgsortPTO(const CallPtr& op, codegen::CodegenBase& cb) {
+  auto& codegen = dynamic_cast<codegen::PTOCodegen&>(cb);
+  CHECK(op->args_.size() == 2)
+      << "manual.mrgsort: expected 2 args (src, dst) for format1, got "
+      << op->args_.size();
+
+  int block_len = op->GetKwarg<int>("block_len");
+
+  std::string block_len_var = codegen.NewTemp();
+  codegen.Emit(block_len_var + " = arith.constant " + std::to_string(block_len) + " : i32");
+
+  std::ostringstream oss;
+  oss << "pto.tmrgsort ins(";
+
+  std::string src = codegen.GetExprAsCode(op->args_[0]);
+  std::string src_type = codegen.GetExprTypeAnnotation(op->args_[0]);
+  oss << src << ", " << block_len_var;
+
+  if (!src_type.empty()) {
+    oss << " : " << src_type << ", i32";
+  }
+
+  oss << ") outs(";
+
+  std::string dst = codegen.GetExprAsCode(op->args_[1]);
+  std::string dst_type = codegen.GetExprTypeAnnotation(op->args_[1]);
+  oss << dst;
+  if (!dst_type.empty()) {
+    oss << " : " << dst_type;
+  }
+
+  oss << ")";
+  codegen.Emit(oss.str());
+  return "";
+}
+
+REGISTER_BACKEND_OP(Backend910B_PTO, "manual.mrgsort")
+    .set_pipe(ir::PipeType::V)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
+      return MakeManualMrgsortPTO(op, codegen);
+    });
+
 }  // namespace backend
 }  // namespace pypto

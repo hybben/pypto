@@ -318,6 +318,8 @@ __all__ = [
     "sels",
     "getval",
     "setval",
+    "sort32",
+    "mrgsort",
     # Promoted tensor-only
     "create_tensor",
     "assemble",

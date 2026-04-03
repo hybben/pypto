@@ -1258,5 +1258,46 @@ REGISTER_BACKEND_OP(Backend910B_CCE, "struct.ref")
       return std::string("");
     });
 
+// ============================================================================
+// Op registrations — Sorting
+// ============================================================================
+
+REGISTER_BACKEND_OP(Backend910B_CCE, "manual.sort32")
+    .set_pipe(ir::PipeType::V)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
+      auto& codegen = dynamic_cast<codegen::CCECodegen&>(codegen_base);
+      CHECK(op->args_.size() == 3 || op->args_.size() == 4)
+          << "manual.sort32: expected 3 or 4 args (src, idx, dst[, tmp]), got "
+          << op->args_.size();
+      
+      std::string src = codegen.GetExprAsCode(op->args_[0]);
+      std::string idx = codegen.GetExprAsCode(op->args_[1]);
+      std::string dst = codegen.GetExprAsCode(op->args_[2]);
+      
+      if (op->args_.size() == 4) {
+        std::string tmp = codegen.GetExprAsCode(op->args_[3]);
+        codegen.Emit("TSORT32(" + dst + ", " + src + ", " + idx + ", " + tmp + ");");
+      } else {
+        codegen.Emit("TSORT32(" + dst + ", " + src + ", " + idx + ");");
+      }
+      return "";
+    });
+
+REGISTER_BACKEND_OP(Backend910B_CCE, "manual.mrgsort")
+    .set_pipe(ir::PipeType::V)
+    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
+      auto& codegen = dynamic_cast<codegen::CCECodegen&>(codegen_base);
+      CHECK(op->args_.size() == 2)
+          << "manual.mrgsort: expected 2 args (src, dst), got "
+          << op->args_.size();
+      
+      std::string src = codegen.GetExprAsCode(op->args_[0]);
+      std::string dst = codegen.GetExprAsCode(op->args_[1]);
+      int block_len = op->GetKwarg<int>("block_len");
+      
+      codegen.Emit("TMRGSORT(" + dst + ", " + src + ", " + std::to_string(block_len) + ");");
+      return "";
+    });
+
 }  // namespace backend
 }  // namespace pypto
