@@ -113,7 +113,7 @@ def dynamic_matmul_qb_kernel(
                         plm.matmul(tile_c, a_left_buf[buf_idx], b_right_buf[buf_idx])
                     else:
                         plm.matmul_acc(tile_c, tile_c, a_left_buf[buf_idx], b_right_buf[buf_idx])
-                plm.l0c_store(tile_c, [i, j], [TILE, TILE], c)
+                plm.store(c, tile_c, [i, j])
 
     return c
 

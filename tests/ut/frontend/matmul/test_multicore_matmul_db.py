@@ -118,8 +118,8 @@ def multicore_matmul_db_kernel(
                     pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=event_ids[buf_idx])
                     pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=event_ids[buf_idx])
 
-                    plm.move(tile_a_buf[buf_idx], tile_a_load_buf[buf_idx], target_memory=pl.MemorySpace.Left)
-                    plm.move(tile_b_buf[buf_idx], tile_b_load_buf[buf_idx], target_memory=pl.MemorySpace.Right)
+                    plm.move(tile_a_buf[buf_idx], tile_a_load_buf[buf_idx])
+                    plm.move(tile_b_buf[buf_idx], tile_b_load_buf[buf_idx])
 
                     pl.system.sync_src(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.M, event_id=event_ids[buf_idx])
                     pl.system.sync_dst(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.M, event_id=event_ids[buf_idx])
@@ -134,7 +134,7 @@ def multicore_matmul_db_kernel(
 
                 pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
                 pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
-                plm.l0c_store(tile_c, [i * TILE, j * TILE], [TILE, TILE], c)
+                plm.store(c, tile_c, [i * TILE, j * TILE])
 
                 pl.system.bar_all()
 

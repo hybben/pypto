@@ -151,7 +151,7 @@ alloc_exp_corr_fifo = _gen_alloc_exp_corr()
 
 
 def compute_qk(ctx, state, const_info):
-    """QK = Q * K^T → l0c_store to qk_buf GM FIFO slot. l0ab/l0c read-only, caller toggles."""
+    """QK = Q * K^T → store to qk_buf GM FIFO slot. l0ab/l0c read-only, caller toggles."""
     qk_fifo_slot = ctx.task_id % FIFO_SIZE
     skv_off = ctx.ki * TKV
     buf_idx = (ctx.q_count * ctx.skv_tiles + ctx.ki) % 2
@@ -172,7 +172,7 @@ def compute_qk(ctx, state, const_info):
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE1, event_id=event_ids_01[state.l0ab_idx])
-    plm.l0c_store(acc_buf[state.l0c_idx], [qk_fifo_slot * const_info.sq_dim + ctx.sq_off, skv_off], [TS, TKV], qk_buf)
+    plm.store(qk_buf, acc_buf[state.l0c_idx], [qk_fifo_slot * const_info.sq_dim + ctx.sq_off, skv_off])
     pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=event_ids_01[state.l0c_idx])
     pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=QK_READY_IDS[qk_fifo_slot], max_event_id=QK_MAX_EID)
     state.l0ab_idx = 1 - state.l0ab_idx
@@ -181,7 +181,7 @@ def compute_qk(ctx, state, const_info):
 
 
 def compute_pv(ctx, state, const_info):
-    """PV = P * V → l0c_store to pv_buf GM. l0ab/l0c read-only, caller toggles."""
+    """PV = P * V → store to pv_buf GM. l0ab/l0c read-only, caller toggles."""
     pv_task_slot = ctx.task_id % FIFO_SIZE
     sv_off = ctx.ki * TKV
     pv_fifo_slot = ctx.task_id % FIFO_SIZE
@@ -203,9 +203,8 @@ def compute_pv(ctx, state, const_info):
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE1, event_id=event_ids_01[state.l0ab_idx])
-    plm.l0c_store(acc_buf[state.l0c_idx],
-                  [const_info.core_id * PV_CORE_STRIDE + (ctx.q_count % 2) * FIFO_SIZE * TS + pv_task_slot * TS, 0],
-                  [TS, TD], pv_buf)
+    plm.store(pv_buf, acc_buf[state.l0c_idx],
+                  [const_info.core_id * PV_CORE_STRIDE + (ctx.q_count % 2) * FIFO_SIZE * TS + pv_task_slot * TS, 0])
     pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=event_ids_01[state.l0c_idx])
     pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=PV_READY_IDS[pv_task_slot], max_event_id=PV_MAX_EID)
     state.l0ab_idx = 1 - state.l0ab_idx

@@ -502,18 +502,6 @@ REGISTER_OP("block.store")
       return DeduceBlockStoreType(args, kwargs, "block.store");
     });
 
-REGISTER_OP("block.l0c_store")
-    .set_op_category("BlockOp")
-    .set_description("Copy data from Acc tile to GM tensor")
-    .add_argument("tile", "Source tile (TileType)")
-    .add_argument("offsets", "Offsets in each dimension (TupleType of ScalarType)")
-    .add_argument("shapes", "Shape of tile in each dimension (TupleType of ScalarType)")
-    .add_argument("output_tensor", "Output tensor (TensorType)")
-    .f_deduce_type([](const std::vector<ExprPtr>& args,
-                      const std::vector<std::pair<std::string, std::any>>& kwargs) {
-      return DeduceBlockStoreType(args, kwargs, "block.l0c_store");
-    });
-
 REGISTER_OP("block.move")
     .set_op_category("BlockOp")
     .set_description("Move tile between memory levels. TMOV variant determined by output tile's memory space.")

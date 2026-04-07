@@ -121,7 +121,7 @@ c_acc = plm.make_tile(acc_type, addr=0, size=16384)
 - `plm.load()` → TLOAD → **MTE2**
 - `plm.move(src, target_memory=Left/Right)` → TMOV → **MTE1**
 - `plm.matmul()` → TMATMUL → **M**
-- `plm.l0c_store()` → TSTORE_ACC → **FIX**
+- `plm.store()` from ACC → TSTORE_ACC → **FIX**
 - `plm.store()` from VEC → TSTORE → **MTE3**
 - `plm.add/sub/mul/exp/...` on VEC tiles → TVEC → **V**
 
@@ -208,25 +208,25 @@ Both views share 64 sequential FP32 values (256 bytes). The hardware tile constr
 plm.load(mat_tile, tensor, offsets)
 pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=0)
 pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=0)
-plm.move(left_tile, mat_tile, target_memory=pl.MemorySpace.Left)
+plm.move(left_tile, mat_tile)
 ```
 
 #### Rule 2: MTE1 → M before TMATMUL
 ```python
-plm.move(left_tile, mat_tile, target_memory=pl.MemorySpace.Left)
-plm.move(right_tile, mat_tile, target_memory=pl.MemorySpace.Right)
+plm.move(left_tile, mat_tile)
+plm.move(right_tile, mat_tile)
 pl.system.sync_src(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.M, event_id=0)
 pl.system.sync_dst(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.M, event_id=0)
 plm.matmul(acc, left_tile, right_tile)
 ```
 
-#### Rule 3: M → FIX before l0c_store (CRITICAL!)
-**Without this, l0c_store reads ACC before matmul completes → garbage data.**
+#### Rule 3: M → FIX before store from ACC (CRITICAL!)
+**Without this, store reads ACC before matmul completes → garbage data.**
 ```python
 plm.matmul(acc, left, right)
 pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
 pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
-plm.l0c_store(acc, offsets, shapes, output_tensor)
+plm.store(output_tensor, acc, offsets)
 ```
 
 #### Rule 4: Backward sync in loops
@@ -245,13 +245,13 @@ When a buffer is reused across loop iterations, wait for previous iteration's pi
 ```
 Cube Section:                          Vector Section:
   Q @ K^T → ACC                         (wait QK_READY)
-  l0c_store ACC → qk_buf                load qk_buf → VEC
+  store ACC → qk_buf                load qk_buf → VEC
   set_cross_core(FIX, QK_READY) ──────► FlashSoftmax on VEC
   wait_cross_core(M, P_READY)           store P → p_buf
   ◄────────────────────────────────────── set_cross_core(MTE3, P_READY)
   load p_buf, load V
   P @ V → ACC
-  l0c_store ACC → pv_buf
+  store ACC → pv_buf
   set_cross_core(FIX, PV_READY) ──────► (wait PV_READY)
                                          load pv_buf → running_O
                                          GlobalUpdate: O += PV
@@ -264,9 +264,9 @@ Cube Section:                          Vector Section:
 Each Cube/Vector core pair needs its own region in pv_buf (Cube→Vector transfer buffer). With double-buffered Q tiles (`q_mat_idx = q_count % 2`), each core needs `2 * TS` rows:
 ```python
 PV_CORE_STRIDE = 2 * TS    # 256 rows per core
-# Cube (l0c_store):
+# Cube (store from ACC):
 offset = core_id * PV_CORE_STRIDE + q_mat_idx * TS
-plm.l0c_store(acc, [offset, 0], [TS, TD], pv_buf)
+plm.store(pv_buf, acc, [offset, 0])
 # Vector (load):
 plm.load(running_o, pv_buf, [core_id * PV_CORE_STRIDE + q_mat_idx * TS + row_off, 0])
 ```

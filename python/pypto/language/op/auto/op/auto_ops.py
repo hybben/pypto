@@ -96,18 +96,6 @@ def store(
     return Tensor(expr=call_expr)
 
 
-def l0c_store(
-    tile: Tile,
-    offsets: Sequence[IntLike],
-    shapes: Sequence[IntLike],
-    output_tensor: Tensor,
-) -> Tensor:
-    call_expr = _ir_block_ops.l0c_store(
-        tile.unwrap(), _normalize_intlike(offsets), _normalize_intlike(shapes), output_tensor.unwrap()
-    )
-    return Tensor(expr=call_expr)
-
-
 def move(tile: Tile, target_memory: MemorySpace, transpose: bool = False) -> Tile:
     call_expr = _ir_block_ops.move(tile.unwrap(), target_memory, transpose)
     return Tile(expr=call_expr)
@@ -924,7 +912,7 @@ block = _types.SimpleNamespace(
     reshape=_block_reshape, transpose=_block_transpose, view=_block_view,
     getval=_block_getval, setval=_block_setval,
     # Non-overlapping
-    make_tile=make_tile, load=load, store=store, l0c_store=l0c_store,
+    make_tile=make_tile, load=load, store=store,
     move=move, vec_move=vec_move, full=full, fillpad=fillpad,
     get_block_idx=get_block_idx, get_subblock_idx=get_subblock_idx,
     get_block_num=get_block_num, index_cast=index_cast,
@@ -978,7 +966,7 @@ __all__ = [
     "row_max", "row_sum",
     "getval", "setval",
     # Block-only (promoted)
-    "make_tile", "load", "store", "l0c_store", "move", "vec_move",
+    "make_tile", "load", "store", "move", "vec_move",
     "full", "fillpad",
     "get_block_idx", "get_subblock_idx", "get_block_num", "index_cast",
     "adds", "subs", "muls", "divs",

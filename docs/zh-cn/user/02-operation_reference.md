@@ -57,7 +57,6 @@
 | ---- | ---- | ---- |
 | `load` | `(tensor: Tensor, offsets: Sequence[IntLike], shapes: Sequence[IntLike], target_memory: MemorySpace = MemorySpace.Vec) -> Tile` | DDR → 片上 tile |
 | `store` | `(tile: Tile, offsets: Sequence[IntLike], shapes: Sequence[IntLike], output_tensor: Tensor) -> Tensor` | Tile → DDR |
-| `l0c_store` | `(tile: Tile, offsets: Sequence[IntLike], shapes: Sequence[IntLike], output_tensor: Tensor) -> Tensor` | Acc tile → DDR |
 | `move` | `(tile: Tile, target_memory: MemorySpace, transpose: bool = False) -> Tile` | 在内存层级间移动 tile |
 | `vec_move` | `(tile: Tile) -> Tile` | 在 Vec 内存内拷贝 tile |
 | `make_tile` | `(shape: Sequence[IntLike], dtype: DataType, target_memory: MemorySpace = MemorySpace.Vec) -> Tile` | 在指定内存空间创建 tile |

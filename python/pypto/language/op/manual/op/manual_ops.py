@@ -376,26 +376,6 @@ def store_tile(
     return Tensor(expr=_ir_manual.store_tile(output_tensor.unwrap(), tile.unwrap(), _to_make_tuple(tile_offsets), tile_dims=tile_dims))
 
 
-def l0c_store(
-    tile: Tile,
-    offsets: Sequence[int | Expr],
-    shapes: Sequence[int | Expr],
-    output_tensor: Tensor,
-) -> Tensor:
-    """Store from an L0C tile to a global tensor.
-
-    Args:
-        tile: Source L0C tile.
-        offsets: Per-dimension offsets.
-        shapes: Region shape.
-        output_tensor: Destination tensor.
-
-    Returns:
-        Tensor wrapping the l0c_store result.
-    """
-    return Tensor(expr=_ir_block_ops.l0c_store(tile.unwrap(), offsets, shapes, output_tensor.unwrap()))
-
-
 def move(
     out: Tile,
     tile: Tile,
@@ -1106,7 +1086,7 @@ __all__ = [
     # Allocation
     "make_tile",
     # Memory
-    "load", "load_tile", "store", "store_tile", "l0c_store", "move", "ub_copy", "full", "fillpad", "get_block_idx", 
+    "load", "load_tile", "store", "store_tile", "move", "ub_copy", "full", "fillpad", "get_block_idx", 
     "get_block_num", "get_subblock_idx",
     # Tile x Tile binary
     "add", "sub", "mul", "div", "rem", "maximum", "minimum",

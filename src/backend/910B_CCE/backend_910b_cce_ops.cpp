@@ -570,49 +570,6 @@ static std::string MakeBlockStoreCodegenCCE(const ir::CallPtr& op, codegen::Code
   return "";
 }
 
-// Helper function for block.l0c_store
-// IR signature: (tile, offsets_tuple, shapes_tuple, output_tensor) = 4 args
-static std::string MakeBlockL0CStoreCodegenCCE(const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
-  auto& codegen = dynamic_cast<codegen::CCECodegen&>(codegen_base);
-  CHECK(op->args_.size() == 4)
-      << "block.l0c_store requires 4 arguments: tile, offsets, shapes, output_tensor";
-
-  std::string src_tile = codegen.GetExprAsCode(op->args_[0]);
-
-  // Extract offsets tuple
-  auto offsets_tuple = std::dynamic_pointer_cast<const ir::MakeTuple>(op->args_[1]);
-  CHECK(offsets_tuple != nullptr) << "block.l0c_store second argument must be a tuple (offsets)";
-  CHECK(!offsets_tuple->elements_.empty()) << "block.l0c_store offsets tuple must have at least 1 element";
-
-  // Extract shapes tuple
-  auto shapes_tuple = std::dynamic_pointer_cast<const ir::MakeTuple>(op->args_[2]);
-  CHECK(shapes_tuple != nullptr) << "block.l0c_store third argument must be a tuple (shapes)";
-
-  auto dst_tensor_var_ptr = std::dynamic_pointer_cast<const ir::Var>(op->args_[3]);
-  CHECK(dst_tensor_var_ptr != nullptr) << "block.l0c_store destination tensor must be a Var";
-
-  std::string dst_tensor_var = codegen.GetVarName(dst_tensor_var_ptr);
-
-  auto dst_tensor_type = std::dynamic_pointer_cast<const ir::TensorType>(dst_tensor_var_ptr->GetType());
-  CHECK(dst_tensor_type != nullptr) << "block.l0c_store destination must be TensorType";
-
-  // compute stride-based offset
-  std::string offset = ComputeStrideBasedOffset(codegen, dst_tensor_var, offsets_tuple, dst_tensor_type);
-
-  // Get buffer address from Tensor struct
-  std::string dst_ptr = codegen.GetPointer(dst_tensor_var);
-  std::string var_name = codegen.GetCurrentResultTarget();
-
-  codegen.Emit("TASSIGN(" + dst_tensor_var + ", " + dst_ptr + " + " + offset + ");");
-  codegen.Emit("TSTORE(" + dst_tensor_var + ", " + src_tile + ");");
-  if (!var_name.empty()) {
-    codegen.RegisterOutputPointer(var_name, dst_tensor_var);
-    codegen.RegisterOutputTensorStruct(var_name, dst_tensor_var);
-    codegen.Emit("auto " + var_name + " = " + dst_tensor_var + ";");
-  }
-  return "";
-}
-
 // Helper function for block.move
 static std::string MakeBlockMoveCodegenCCE(const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
   auto& codegen = dynamic_cast<codegen::CCECodegen&>(codegen_base);
@@ -889,12 +846,6 @@ REGISTER_BACKEND_OP(Backend910B_CCE, "block.store")
     .set_pipe(ir::PipeType::MTE3)
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
       return MakeBlockStoreCodegenCCE(op, codegen);
-    });
-
-REGISTER_BACKEND_OP(Backend910B_CCE, "block.l0c_store")
-    .set_pipe(ir::PipeType::FIX)
-    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
-      return MakeBlockL0CStoreCodegenCCE(op, codegen);
     });
 
 REGISTER_BACKEND_OP(Backend910B_CCE, "block.move")

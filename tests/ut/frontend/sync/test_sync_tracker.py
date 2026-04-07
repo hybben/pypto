@@ -414,10 +414,6 @@ class TestOpMappingConsistency:
         assert "store" not in _OP_TO_PIPE
         assert "store_tile" not in _OP_TO_PIPE
 
-    def test_l0c_store_is_fix(self):
-        """l0c_store always stores from ACC → PIPE_FIX."""
-        assert _OP_TO_PIPE["l0c_store"] == PipeType.FIX
-
     def test_move_has_access_pattern(self):
         """'move' should still have an access pattern."""
         assert "move" in _OP_TILE_ACCESS
