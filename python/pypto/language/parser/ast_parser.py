@@ -2958,7 +2958,6 @@ class ASTParser:
     # These are routed to _parse_block_op directly.
     _MANUAL_AS_BLOCK_OPS: frozenset[str] = frozenset({
         "make_tile",  # allocation — same IR op as SSA
-        "l0c_store",    # writes L0C tile to tensor
     })
 
     _MANUAL_AS_DEBUG_OPS: frozenset[str] = frozenset({
@@ -2988,7 +2987,7 @@ class ASTParser:
 
         # Ops with SSA block semantics — no explicit output tile needed.
         if op_name in self._MANUAL_AS_BLOCK_OPS:
-            # Auto-sync: emit forward sync before block ops too (e.g. l0c_store)
+            # Auto-sync: emit forward sync before block ops too
             if self.sync_tracker is not None:
                 self._emit_forward_syncs_for_manual_op(op_name, call, span)
             return self._parse_block_op(op_name, call)
@@ -3523,7 +3522,6 @@ class ASTParser:
     _BLOCK_ONLY_OPS = {
         "load",
         "store",
-        "l0c_store",
         "move",
         "neg",
         "sqrt",

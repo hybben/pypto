@@ -57,7 +57,7 @@ plm.add(...)
 
 ### 2. Wrong pv_buf Multi-Core Offset (core_id * 24)
 
-**Bug**: `plm.l0c_store(acc, [core_id * 24 + q_mat_idx * TS, 0], ...)` — the `24` was wrong. Each core needs `2 * TS = 256` rows in pv_buf (double-buffered Q tile slots).
+**Bug**: `plm.store(pv_buf, acc, [core_id * 24 + q_mat_idx * TS, 0])` — the `24` was wrong. Each core needs `2 * TS = 256` rows in pv_buf (double-buffered Q tile slots).
 
 **Fix**: `PV_CORE_STRIDE = 2 * TS` → `core_id * PV_CORE_STRIDE + q_mat_idx * TS`
 
@@ -87,7 +87,6 @@ plm.cast(OUT, tile, target_type=pl.FP16, mode="round")
 
 **Exceptions** (parsed as block ops, NO reordering):
 - `plm.make_tile(tile_type, addr=X, size=Y)` → `block.make_tile(...)`
-- `plm.l0c_store(tile, offsets, shapes, tensor)` → `block.l0c_store(tile, offsets, shapes, tensor)`
 
 ## VEC Reduce Tile Pattern
 

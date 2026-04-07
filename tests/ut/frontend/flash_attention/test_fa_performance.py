@@ -154,7 +154,7 @@ alloc_exp_corr_fifo = _gen_alloc_exp_corr()
 #  Cube: compute_qk / compute_pv  (use ctx.task_id for FIFO slot)
 # ================================================================
 def compute_qk(ctx):
-    """QK = Q * K^T → l0c_store to qk_buf GM FIFO slot."""
+    """QK = Q * K^T → store to qk_buf GM FIFO slot."""
     q_mat_idx = ctx.q_count % 2
     qk_fifo_slot = ctx.task_id % FIFO_SIZE
     skv_off = ctx.ki * TKV
@@ -178,7 +178,7 @@ def compute_qk(ctx):
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE1, event_id=event_ids_01[ctx.l0ab_idx])
-    plm.l0c_store(acc_buf[ctx.l0c_idx], [qk_fifo_slot * ctx.sq_dim + ctx.sq_off, skv_off], [TS, TKV], qk_buf)
+    plm.store(qk_buf, acc_buf[ctx.l0c_idx], [qk_fifo_slot * ctx.sq_dim + ctx.sq_off, skv_off])
     pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=event_ids_01[ctx.l0c_idx])
     ctx.l0ab_idx = 1 - ctx.l0ab_idx
     ctx.l0c_idx = 1 - ctx.l0c_idx
@@ -187,7 +187,7 @@ def compute_qk(ctx):
 
 
 def compute_pv(ctx):
-    """PV = P * V → l0c_store to pv_buf GM (double-buffered per core)."""
+    """PV = P * V → store to pv_buf GM (double-buffered per core)."""
     q_mat_idx = ctx.q_count % 2
     pv_task_slot = ctx.task_id % FIFO_SIZE
     sv_off = ctx.ki * TKV
@@ -212,9 +212,8 @@ def compute_pv(ctx):
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE1, event_id=event_ids_01[ctx.l0ab_idx])
-    plm.l0c_store(acc_buf[ctx.l0c_idx],
-                  [ctx.core_id * PV_CORE_STRIDE + q_mat_idx * FIFO_SIZE * TS + pv_task_slot * TS, 0],
-                  [TS, TD], pv_buf)
+    plm.store(pv_buf, acc_buf[ctx.l0c_idx],
+                  [ctx.core_id * PV_CORE_STRIDE + q_mat_idx * FIFO_SIZE * TS + pv_task_slot * TS, 0])
     pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=event_ids_01[ctx.l0c_idx])
     ctx.l0ab_idx = 1 - ctx.l0ab_idx
     ctx.l0c_idx = 1 - ctx.l0c_idx

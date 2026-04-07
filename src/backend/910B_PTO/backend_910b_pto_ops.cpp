@@ -1182,12 +1182,6 @@ REGISTER_BACKEND_OP(Backend910B_PTO, "block.store")
       return MakeBlockStoreCodegenPTO(op, codegen);
     });
 
-REGISTER_BACKEND_OP(Backend910B_PTO, "block.l0c_store")
-    .set_pipe(ir::PipeType::MTE3)
-    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
-      return MakeBlockStoreCodegenPTO(op, codegen);
-    });
-
 REGISTER_BACKEND_OP(Backend910B_PTO, "block.alloc")
     .set_pipe(ir::PipeType::MTE2)
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {

@@ -174,7 +174,7 @@ def compute_qk(q_count, skvi, sq_off, buf_idx, l0ab_idx, l0c_idx):
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE1, event_id=event_ids_01[l0ab_idx])
-    plm.l0c_store(acc_buf[l0c_idx], [sq_off, skv_off], [TS, TKV], qk_buf)
+    plm.store(qk_buf, acc_buf[l0c_idx], [sq_off, skv_off])
     pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=event_ids_01[l0c_idx])
     pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=QK_READY)
     return
@@ -203,7 +203,7 @@ def compute_pv(q_count, skvi, sq_off, buf_idx, l0ab_idx, l0c_idx, core_id):
     pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
 
     pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.MTE1, event_id=event_ids_01[l0ab_idx])
-    plm.l0c_store(acc_buf[l0c_idx], [core_id * PV_CORE_STRIDE + q_mat_idx * TS, 0], [TS, TD], pv_buf)
+    plm.store(pv_buf, acc_buf[l0c_idx], [core_id * PV_CORE_STRIDE + q_mat_idx * TS, 0])
     pl.system.sync_src(set_pipe=pl.PipeType.FIX, wait_pipe=pl.PipeType.M, event_id=event_ids_01[l0c_idx])
     pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=PV_READY)
     return

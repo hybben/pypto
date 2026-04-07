@@ -263,7 +263,7 @@ class SyncTracker:
 
         After restoring the snapshot, merge back the ``last_write_pipe`` from
         tiles that were written inside the loop body.  This allows post-loop
-        code (e.g. ``l0c_store`` after a k-loop) to see the dependency on the
+        code (e.g. ``store`` after a k-loop) to see the dependency on the
         loop's final write pipe (e.g. ``M``).
         """
         self._current_loop_depth -= 1

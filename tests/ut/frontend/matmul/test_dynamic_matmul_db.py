@@ -162,7 +162,7 @@ def dynamic_matmul_db_kernel(
                 pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
                 plm.store(c, tile_c, [i, j])
 
-                # Barrier to ensure l0c_store is complete before next (i, j) iteration
+                # Barrier to ensure store is complete before next (i, j) iteration
                 pl.system.bar_all()
 
     return c

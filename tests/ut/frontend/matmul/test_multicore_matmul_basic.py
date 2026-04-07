@@ -123,7 +123,7 @@ def multicore_matmul_basic_kernel(
                 
                 pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
                 pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
-                plm.l0c_store(tile_c, [i * TILE, j * TILE], [TILE, TILE], c)
+                plm.store(c, tile_c, [i * TILE, j * TILE])
                 
                 pl.system.bar_all()
 

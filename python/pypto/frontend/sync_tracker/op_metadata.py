@@ -24,7 +24,6 @@ _OP_TO_PIPE: dict[str, PipeType] = {
     "load": PipeType.MTE2,
     "load_tile": PipeType.MTE2,
     # "store" and "store_tile" are handled by get_store_pipe() — see below
-    "l0c_store": PipeType.FIX,  # Always from ACC → PIPE_FIX
     # Matrix
     "matmul": PipeType.M,
     "matmul_acc": PipeType.M,
@@ -153,7 +152,6 @@ _OP_TILE_ACCESS: dict[str, TileAccessPattern] = {
     # store(tensor, tile, offsets, ...)  [ir_op.manual handler]
     "store":      TileAccessPattern([1], []),
     "store_tile": TileAccessPattern([1], []),
-    "l0c_store":  TileAccessPattern([0], []),
     # Binary tile × tile  – DSL: op(out, lhs, rhs)
     "add":     TileAccessPattern([1, 2], [0]),
     "sub":     TileAccessPattern([1, 2], [0]),

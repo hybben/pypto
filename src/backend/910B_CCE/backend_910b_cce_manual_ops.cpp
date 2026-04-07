@@ -198,15 +198,6 @@ static std::string MakeManualStoreCodegenCCE(const ir::CallPtr& op, codegen::Cod
 }
 
 // ============================================================================
-// manual.l0c_store — args = [tile, offsets, output_tensor]
-// Same as manual.store but for ACC→GM transfers
-// ============================================================================
-static std::string MakeManualL0CStoreCodegenCCE(const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
-  // Same as manual.store — TSTORE handles ACC→GM
-  return MakeManualStoreCodegenCCE(op, codegen_base);
-}
-
-// ============================================================================
 // manual.make_tile — no-op (tile already declared in prologue)
 // ============================================================================
 static std::string MakeManualMakeTileCodegenCCE(const ir::CallPtr& op, codegen::CodegenBase& codegen_base) {
@@ -632,12 +623,6 @@ REGISTER_BACKEND_OP(Backend910B_CCE, "manual.store")
     .set_pipe(ir::PipeType::MTE3)
     .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
       return MakeManualStoreCodegenCCE(op, codegen);
-    });
-
-REGISTER_BACKEND_OP(Backend910B_CCE, "manual.l0c_store")
-    .set_pipe(ir::PipeType::FIX)
-    .f_codegen([](const ir::CallPtr& op, codegen::CodegenBase& codegen) {
-      return MakeManualL0CStoreCodegenCCE(op, codegen);
     });
 
 REGISTER_BACKEND_OP(Backend910B_CCE, "manual.make_tile")

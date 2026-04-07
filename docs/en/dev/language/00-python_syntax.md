@@ -325,7 +325,6 @@ plm.load(tile_buf[buf_idx], tensor, [i, k])   # variable-index dispatch
 | `load_tile` | `(out, tensor, tile_offsets) → None` | GM → tile (tile-relative offsets) |
 | `store` | `(tensor, tile, offsets, shapes?) → Tensor` | tile → GM |
 | `store_tile` | `(tensor, tile, tile_offsets) → Tensor` | tile → GM (tile-relative) |
-| `l0c_store` | `(tile, offsets, shapes, tensor) → Tensor` | Acc → GM |
 | `move` | `(tile, target_memory, out, transpose?) → None` | Move between memory levels |
 | `ub_copy` | `(tile, out) → None` | Copy within UB |
 | `full` | `(value, out) → None` | Fill tile with scalar |
@@ -334,8 +333,7 @@ plm.load(tile_buf[buf_idx], tensor, [i, k])   # variable-index dispatch
 ```python
 plm.load(tile_a, tensor_a, [i, k])                       # Load from GM
 plm.move(tile_a, tile_a_compute)    # Mat → Left
-plm.store(output_tensor, tile_c, [i, j])                 # Tile → GM
-plm.l0c_store(tile_c, [i, j], [128, 128], output_tensor) # Acc → GM
+plm.store(output_tensor, tile_c, [i, j])                 # Tile → GM (Acc or UB)
 ```
 
 ### Elementwise Operations

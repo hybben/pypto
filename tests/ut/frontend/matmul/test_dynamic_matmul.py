@@ -101,7 +101,7 @@ def dynamic_matmul_kernel(
                 
                 # pl.system.sync_src(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
                 # pl.system.sync_dst(set_pipe=pl.PipeType.M, wait_pipe=pl.PipeType.FIX, event_id=0)
-                plm.l0c_store(tile_c, [i, j], [128, 128], c)
+                plm.store(c, tile_c, [i, j])
                 
                 # pl.system.bar_all()
 
