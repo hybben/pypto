@@ -208,13 +208,13 @@ Both views share 64 sequential FP32 values (256 bytes). The hardware tile constr
 plm.load(mat_tile, tensor, offsets)
 pl.system.sync_src(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=0)
 pl.system.sync_dst(set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.MTE1, event_id=0)
-plm.move(left_tile, mat_tile, target_memory=pl.MemorySpace.Left)
+plm.move(left_tile, mat_tile)
 ```
 
 #### Rule 2: MTE1 → M before TMATMUL
 ```python
-plm.move(left_tile, mat_tile, target_memory=pl.MemorySpace.Left)
-plm.move(right_tile, mat_tile, target_memory=pl.MemorySpace.Right)
+plm.move(left_tile, mat_tile)
+plm.move(right_tile, mat_tile)
 pl.system.sync_src(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.M, event_id=0)
 pl.system.sync_dst(set_pipe=pl.PipeType.MTE1, wait_pipe=pl.PipeType.M, event_id=0)
 plm.matmul(acc, left_tile, right_tile)
